@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# 추가 개발 도구
+ipython==8.14.0
+jupyter==1.0.0
+matplotlib==3.7.2
