@@ -8,12 +8,12 @@ from typing import Optional
 
 import numpy as np
 
-from stt_core.audio_input.audio_data import (
+from backend.stt_core.audio_input.audio_data import (
     AudioData,
     InvalidAudioFormatError,
     CorruptedAudioDataError,
 )
-from stt_core.input_providers.base import IAudioInputProvider
+from backend.stt_core.input_providers.base import IAudioInputProvider
 
 
 logger = logging.getLogger(__name__)

@@ -10,8 +10,8 @@ from typing import Dict
 import numpy as np
 import librosa
 
-from stt_core.input_providers.base import IAudioInputProvider
-from stt_core.audio_input.audio_data import AudioData, InvalidAudioFormatError
+from backend.stt_core.input_providers.base import IAudioInputProvider
+from backend.stt_core.audio_input.audio_data import AudioData, InvalidAudioFormatError
 
 
 logger = logging.getLogger(__name__)

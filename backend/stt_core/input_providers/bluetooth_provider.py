@@ -6,8 +6,8 @@ Strategy Pattern 구현 - 실제 하드웨어용
 import logging
 from typing import Dict, Optional
 
-from stt_core.input_providers.base import IAudioInputProvider
-from stt_core.audio_input.audio_data import AudioData, InvalidAudioFormatError
+from backend.stt_core.input_providers.base import IAudioInputProvider
+from backend.stt_core.audio_input.audio_data import AudioData, InvalidAudioFormatError
 
 
 logger = logging.getLogger(__name__)
