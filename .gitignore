@@ -68,3 +68,4 @@ mobile/ios/Pods/
 mobile/ios/.xcworkspace/
 mobile/android/.gradle/
 mobile/android/local.properties
+test_audio.wav
