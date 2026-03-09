@@ -1,0 +1,33 @@
+{
+  "inputSource": {
+    "type": "file",
+    "filePath": "test_audio.wav"
+  },
+  "audioInput": {
+    "maxDuration_seconds": 300,
+    "supportedFormats": ["PCM", "WAV"],
+    "timeout_ms": 5000
+  },
+  "preprocessing": {
+    "targetSampleRate": 16000,
+    "chunkSize_seconds": 2,
+    "preEmphasisCoef": 0.97,
+    "noiseRemovalAlpha": 3.0,
+    "targetRMS": 0.3,
+    "vadThreshold": 0.05
+  },
+  "stt": {
+    "model": "whisper",
+    "modelSize": "base",
+    "language": "ko",
+    "confidenceThreshold": 0.7
+  },
+  "pipeline": {
+    "processingMode": "hybrid",
+    "timeout_ms": 30000
+  },
+  "logging": {
+    "level": "INFO",
+    "maxFileSize_MB": 10
+  }
+}
