@@ -69,3 +69,14 @@ mobile/ios/.xcworkspace/
 mobile/android/.gradle/
 mobile/android/local.properties
 test_audio.wav
+
+# backend/data_generation/
+backend/data_generation/raw_downloads/  # 원본 음성 (용량 큼)
+backend/data_generation/stt_and_vad/    # 처리 중간 파일
+backend/data_generation/synthesized/    # 합성 음성 (용량 큼)
+backend/data_generation/logs/           # 로그 파일
+
+# models/generated/
+models/generated/raw/
+models/generated/processed/
+models/generated/finetuning_datasets/
