@@ -1,0 +1,40 @@
+youtube:
+  playlist_ids:
+    - "PLxxxxxxxxxxxxxxxx"
+  max_videos_per_playlist: 10
+
+quality_validation:
+  min_audio_length_ms: 1000
+  max_audio_length_ms: 30000
+  min_energy_db: -40
+  max_energy_db: -10
+
+stt:
+  model: "whisper-base"
+  language: "ko"
+  min_confidence: 0.85
+  device: "cuda"
+
+vad:
+  model: "pyannote/segmentation"
+  threshold: 0.5
+  min_speech_duration_ms: 300
+
+synthesis:
+  snr_levels_db: [5, 10, 15, 20, 25]
+  noise_types: ["ambient", "traffic", "office"]
+  noise_distribution:
+    ambient: 0.4
+    traffic: 0.3
+    office: 0.3
+
+output_dirs:
+  raw_downloads: "./backend/data_generation/raw_downloads"
+  stt_and_vad: "./backend/data_generation/stt_and_vad"
+  synthesized: "./backend/data_generation/synthesized"
+  dataset: "./backend/data_generation/dataset"
+  logs: "./logs"
+
+reproducibility:
+  seed: 42
+  version: "1.0"
