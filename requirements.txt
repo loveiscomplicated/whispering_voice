@@ -5,8 +5,11 @@ scipy==1.11.1
 soundfile==0.12.1
 
 # STT 모델
-openai-whisper==20230314
-vosk==0.3.45
+openai-whisper==20250625
+vosk
+
+#VAD
+pyannote.audio
 
 # 테스트
 pytest==7.4.0
@@ -17,9 +20,11 @@ black==23.7.0
 flake8==6.0.0
 mypy==1.4.1
 
-# 로깅 및 설정
-python-dotenv==1.0.0
-pyyaml==6.0
+# logging
+python-dotenv
+pyyaml
 
-# 유틸리티
-tqdm==4.65.0
+# Pipeline utilities
+tqdm
+pandas
+tenacity

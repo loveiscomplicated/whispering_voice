@@ -4,3 +4,6 @@
 ipython==8.14.0
 jupyter==1.0.0
 matplotlib==3.7.2
+
+# YouTube downloader
+yt-dlp
