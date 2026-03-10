@@ -147,10 +147,10 @@ python src/data_generation_pipeline.py --config config/generation.yaml
 ### Run individual stages
 ```bash
 # Stage 1: Download audio
-python src/1_download_youtube.py --config config/generation.yaml
+python src/_1_download_youtube.py --config config/generation.yaml
 
 # Stage 2: Pre-processing validation
-python src/2_quality_validation_1.py \
+python src/_2_quality_validation_1.py \
     --input-dir raw_downloads \
     --config config/generation.yaml
 
@@ -161,13 +161,13 @@ python src/3_run_stt_and_vad.py \
     --passed-json logs/quality_validation_1_report_passed.json
 
 # Stage 4: Noise synthesis
-python src/4_synthesize_noise.py --config config/generation.yaml
+python src/_4_synthesize_noise.py --config config/generation.yaml
 
 # Stage 5: Post-processing validation
-python src/5_quality_validation_2.py --config config/generation.yaml
+python src/_5_quality_validation_2.py --config config/generation.yaml
 
 # Stage 6: Dataset generation
-python src/6_generate_finetuning_dataset.py --config config/generation.yaml
+python src/_6_generate_finetuning_dataset.py --config config/generation.yaml
 ```
 
 ### Resume after interruption
