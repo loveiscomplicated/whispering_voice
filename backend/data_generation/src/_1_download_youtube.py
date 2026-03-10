@@ -46,6 +46,7 @@ logger = setup_logger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _import_yt_dlp() -> Any:
     """Import yt-dlp lazily so the module is importable without the package.
 
@@ -93,6 +94,7 @@ def _is_valid_wav(path: Path) -> bool:
 # ---------------------------------------------------------------------------
 # Main class
 # ---------------------------------------------------------------------------
+
 
 class YouTubeDownloader:
     """Download audio from YouTube playlists or individual videos.
@@ -148,8 +150,8 @@ class YouTubeDownloader:
         self._logger.info(f"Fetching playlist info: {playlist_url}")
         video_urls = self._extract_playlist_urls(playlist_url)
 
-        max_videos: int = (
-            self._config.get("youtube", {}).get("max_videos_per_playlist", 10)
+        max_videos: int = self._config.get("youtube", {}).get(
+            "max_videos_per_playlist", 10
         )
         video_urls = video_urls[:max_videos]
         self._logger.info(
@@ -164,9 +166,7 @@ class YouTubeDownloader:
             except Exception as exc:
                 self._logger.warning(f"Skipping {url}: {exc}")
 
-        self._logger.info(
-            f"Playlist done — {len(paths)}/{len(video_urls)} succeeded"
-        )
+        self._logger.info(f"Playlist done — {len(paths)}/{len(video_urls)} succeeded")
         return paths
 
     def download_single(
@@ -203,9 +203,7 @@ class YouTubeDownloader:
         self._download_with_retry(video_url, video_id)
 
         if not _is_valid_wav(wav_path):
-            raise RuntimeError(
-                f"Downloaded file is missing or corrupted: {wav_path}"
-            )
+            raise RuntimeError(f"Downloaded file is missing or corrupted: {wav_path}")
 
         metadata = {
             "video_id": video_id,
@@ -338,8 +336,10 @@ class YouTubeDownloader:
             # Resample + mono via ffmpeg args applied after extraction
             "postprocessor_args": {
                 "FFmpegExtractAudio": [
-                    "-ar", str(self._WAV_SAMPLE_RATE),
-                    "-ac", "1",
+                    "-ar",
+                    str(self._WAV_SAMPLE_RATE),
+                    "-ac",
+                    "1",
                 ]
             },
             "quiet": True,
@@ -375,6 +375,7 @@ class YouTubeDownloader:
 # ---------------------------------------------------------------------------
 # CLI entry-point
 # ---------------------------------------------------------------------------
+
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(

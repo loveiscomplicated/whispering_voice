@@ -14,6 +14,7 @@ import soundfile as sf
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def config() -> dict:
     return {
@@ -30,7 +31,7 @@ def mock_logger() -> MagicMock:
 @pytest.fixture()
 def downloader(tmp_path, config, mock_logger):
     """YouTubeDownloader with yt-dlp stubbed out."""
-    with patch("src.1_download_youtube._import_yt_dlp") as mock_import:
+    with patch("src._1_download_youtube._import_yt_dlp") as mock_import:
         mock_yt = MagicMock()
         mock_import.return_value = mock_yt
 
@@ -49,6 +50,7 @@ def downloader(tmp_path, config, mock_logger):
 # ---------------------------------------------------------------------------
 # _is_valid_wav
 # ---------------------------------------------------------------------------
+
 
 class TestIsValidWav:
     def test_valid_wav_returns_true(self, tmp_path):
@@ -83,6 +85,7 @@ class TestIsValidWav:
 # ---------------------------------------------------------------------------
 # _save_metadata
 # ---------------------------------------------------------------------------
+
 
 class TestSaveMetadata:
     def test_writes_json_file(self, downloader):
@@ -121,6 +124,7 @@ class TestSaveMetadata:
 # get_downloaded_files
 # ---------------------------------------------------------------------------
 
+
 class TestGetDownloadedFiles:
     def test_empty_initially(self, downloader):
         dl, _, _ = downloader
@@ -136,6 +140,7 @@ class TestGetDownloadedFiles:
 # ---------------------------------------------------------------------------
 # download_single — skip logic
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadSingleSkip:
     def test_skips_existing_valid_file(self, downloader, tmp_path):
@@ -168,6 +173,7 @@ class TestDownloadSingleSkip:
 # ---------------------------------------------------------------------------
 # _extract_playlist_urls
 # ---------------------------------------------------------------------------
+
 
 class TestExtractPlaylistUrls:
     def test_returns_video_urls(self, downloader):

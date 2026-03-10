@@ -262,7 +262,7 @@ class DataGenerationPipeline:
     # Stage runners ---------------------------------------------------
 
     def _run_stage_1(self) -> dict[str, Any]:
-        from backend.data_generation.src._1_download_youtube import (
+        from src._1_download_youtube import (
             YouTubeDownloader,
         )  # noqa: PLC0415
 
@@ -282,7 +282,7 @@ class DataGenerationPipeline:
         return {"downloaded_files": len(all_paths), "output_dir": self._raw_dir}
 
     def _run_stage_2(self) -> dict[str, Any]:
-        from backend.data_generation.src._2_quality_validation_1 import (
+        from src._2_quality_validation_1 import (
             QualityValidator1,
         )  # noqa: PLC0415
 
@@ -300,7 +300,7 @@ class DataGenerationPipeline:
         }
 
     def _run_stage_3(self) -> dict[str, Any]:
-        from backend.data_generation.src._3_run_stt_and_vad import (
+        from src._3_run_stt_and_vad import (
             STTAndVADProcessor,
         )  # noqa: PLC0415
 
@@ -338,7 +338,7 @@ class DataGenerationPipeline:
         }
 
     def _run_stage_4(self) -> dict[str, Any]:
-        from backend.data_generation.src._4_synthesize_noise import (
+        from src._4_synthesize_noise import (
             NoiseSynthesizer,
         )  # noqa: PLC0415
 
@@ -353,7 +353,7 @@ class DataGenerationPipeline:
         return {"synthesized_files": total, "output_dir": self._synth_dir}
 
     def _run_stage_5(self) -> dict[str, Any]:
-        from backend.data_generation.src._5_quality_validation_2 import (
+        from src._5_quality_validation_2 import (
             QualityValidator2,
         )  # noqa: PLC0415
 
@@ -372,7 +372,7 @@ class DataGenerationPipeline:
         }
 
     def _run_stage_6(self) -> dict[str, Any]:
-        from backend.data_generation.src._6_generate_finetuning_dataset import (
+        from src._6_generate_finetuning_dataset import (
             FinetuningDatasetGenerator,
         )  # noqa: PLC0415
 
@@ -406,7 +406,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=1,
         metavar="N",
-        help="Stage to start from (1–6). Default: 1.",
+        help="Stage to start from (1-6). Default: 1.",
     )
     group.add_argument(
         "--resume",

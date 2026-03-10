@@ -60,6 +60,7 @@ _SNR_TOLERANCE_DB = 3.0
 # Result dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ValidationResult2:
     """Outcome of a single synthesized-audio validation.
@@ -107,13 +108,16 @@ class ValidationResult2:
     def to_dict(self) -> dict[str, Any]:
         """Return a flat dictionary suitable for a DataFrame row."""
         d = asdict(self)
-        d["failure_reasons"] = "; ".join(self.failure_reasons) if self.failure_reasons else ""
+        d["failure_reasons"] = (
+            "; ".join(self.failure_reasons) if self.failure_reasons else ""
+        )
         return d
 
 
 # ---------------------------------------------------------------------------
 # Validator
 # ---------------------------------------------------------------------------
+
 
 class QualityValidator2:
     """Validate synthesized audio files after Stage 4.
@@ -173,7 +177,8 @@ class QualityValidator2:
             raise NotADirectoryError(f"Input directory not found: {directory}")
 
         audio_files = sorted(
-            p for p in dir_path.rglob("*")
+            p
+            for p in dir_path.rglob("*")
             if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS
         )
 
@@ -221,8 +226,8 @@ class QualityValidator2:
         if len(noise) < max_len:
             noise = np.pad(noise, (0, max_len - len(noise)))
 
-        rms_s = float(np.sqrt(np.mean(signal ** 2)))
-        rms_n = float(np.sqrt(np.mean(noise ** 2)))
+        rms_s = float(np.sqrt(np.mean(signal**2)))
+        rms_n = float(np.sqrt(np.mean(noise**2)))
 
         if rms_n < 1e-9:
             return float("inf")
@@ -334,7 +339,9 @@ class QualityValidator2:
         # 4. Duration
         duration_ms = len(audio) / sr * 1_000
         result.duration_ms = duration_ms
-        result.duration_ok = self._min_duration_ms <= duration_ms <= self._max_duration_ms
+        result.duration_ok = (
+            self._min_duration_ms <= duration_ms <= self._max_duration_ms
+        )
         if not result.duration_ok:
             reasons.append(
                 f"duration {duration_ms:.0f} ms outside "
@@ -342,7 +349,7 @@ class QualityValidator2:
             )
 
         # 5. RMS energy
-        rms = float(np.sqrt(np.mean(audio ** 2)))
+        rms = float(np.sqrt(np.mean(audio**2)))
         rms_db = float(20.0 * np.log10(rms + 1e-9))
         result.rms_energy_db = rms_db
         result.energy_ok = self._min_energy_db <= rms_db <= self._max_energy_db
@@ -383,7 +390,9 @@ class QualityValidator2:
                                 f"measured={measured:.1f})"
                             )
                     except Exception as exc:
-                        self._logger.debug(f"SNR measurement failed for {path.name}: {exc}")
+                        self._logger.debug(
+                            f"SNR measurement failed for {path.name}: {exc}"
+                        )
                 else:
                     self._logger.debug(
                         f"Source files not available for SNR check: {path.name}"
@@ -412,9 +421,7 @@ class QualityValidator2:
             self._logger.warning(f"Failed to parse sidecar {sidecar.name}: {exc}")
             return None
 
-    def _compute_snr_stats(
-        self, df: pd.DataFrame
-    ) -> dict[str, Any]:
+    def _compute_snr_stats(self, df: pd.DataFrame) -> dict[str, Any]:
         """Compute pass-rate statistics grouped by target SNR level.
 
         Args:
@@ -454,6 +461,7 @@ class QualityValidator2:
 # CLI entry-point
 # ---------------------------------------------------------------------------
 
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Post-processing quality validation for synthesized audio (Stage 5).",
@@ -488,7 +496,9 @@ def main(argv: list[str] | None = None) -> None:
     log_file = args.log_file or str(Path(logs_dir) / "5_quality_validation_2.log")
     log = setup_logger("quality_validation_2", log_file=log_file)
 
-    input_dir = args.input_dir or config["output_dirs"].get("synthesized", "./synthesized")
+    input_dir = args.input_dir or config["output_dirs"].get(
+        "synthesized", "./synthesized"
+    )
     validator = QualityValidator2(config=config, logger=log)
     df = validator.validate_batch(input_dir)
 

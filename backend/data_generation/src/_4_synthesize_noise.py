@@ -49,6 +49,7 @@ _SUPPORTED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
 # DSP helpers
 # ---------------------------------------------------------------------------
 
+
 def _rms(audio: np.ndarray) -> float:
     """Compute root-mean-square energy of an audio array.
 
@@ -58,7 +59,7 @@ def _rms(audio: np.ndarray) -> float:
     Returns:
         RMS value (always non-negative).
     """
-    return float(np.sqrt(np.mean(audio ** 2)))
+    return float(np.sqrt(np.mean(audio**2)))
 
 
 def _apply_fade(audio: np.ndarray, sr: int, fade_ms: float = 50.0) -> np.ndarray:
@@ -78,8 +79,8 @@ def _apply_fade(audio: np.ndarray, sr: int, fade_ms: float = 50.0) -> np.ndarray
 
     result = audio.copy()
     ramp = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
-    result[:fade_samples] *= ramp          # fade-in
-    result[-fade_samples:] *= ramp[::-1]   # fade-out
+    result[:fade_samples] *= ramp  # fade-in
+    result[-fade_samples:] *= ramp[::-1]  # fade-out
     return result
 
 
@@ -103,6 +104,7 @@ def _loop_to_length(audio: np.ndarray, target_length: int) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Synthesizer
 # ---------------------------------------------------------------------------
+
 
 class NoiseSynthesizer:
     """Mix clean audio with background noise at target SNR levels.
@@ -225,7 +227,8 @@ class NoiseSynthesizer:
         out_root = Path(output_dir) if output_dir else self._output_base
 
         asmr_files = sorted(
-            p for p in Path(asmr_dir).iterdir()
+            p
+            for p in Path(asmr_dir).iterdir()
             if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS
         )
         if not asmr_files:
@@ -238,7 +241,8 @@ class NoiseSynthesizer:
             type_dir = Path(noise_dir) / noise_type
             if type_dir.is_dir():
                 files = sorted(
-                    p for p in type_dir.iterdir()
+                    p
+                    for p in type_dir.iterdir()
                     if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS
                 )
                 if files:
@@ -252,7 +256,9 @@ class NoiseSynthesizer:
             self._logger.error("No usable noise files found. Aborting batch.")
             return {}
 
-        total = len(asmr_files) * sum(len(v) for v in noise_files.values()) * len(levels)
+        total = (
+            len(asmr_files) * sum(len(v) for v in noise_files.values()) * len(levels)
+        )
         self._logger.info(
             f"Synthesizing {total} combinations "
             f"({len(asmr_files)} ASMR × noise × {len(levels)} SNR levels)"
@@ -383,6 +389,7 @@ class NoiseSynthesizer:
 # CLI entry-point
 # ---------------------------------------------------------------------------
 
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Mix ASMR audio with background noise at multiple SNR levels (Stage 4).",
@@ -436,7 +443,9 @@ def main(argv: list[str] | None = None) -> None:
     log_file = args.log_file or str(Path(logs_dir) / "4_synthesize_noise.log")
     log = setup_logger("synthesize_noise", log_file=log_file)
 
-    asmr_dir = args.asmr_dir or config["output_dirs"].get("stt_and_vad", "./stt_and_vad")
+    asmr_dir = args.asmr_dir or config["output_dirs"].get(
+        "stt_and_vad", "./stt_and_vad"
+    )
     noise_dir = args.noise_dir or str(
         Path(config["output_dirs"].get("raw_downloads", "./raw_downloads")) / "noise"
     )
@@ -450,7 +459,9 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     total_files = sum(len(v) for v in results.values())
-    out_root = args.output_dir or config["output_dirs"].get("synthesized", "./synthesized")
+    out_root = args.output_dir or config["output_dirs"].get(
+        "synthesized", "./synthesized"
+    )
     print(f"\nSynthesized: {total_files} file(s)")
     print(f"Output dir : {out_root}")
 

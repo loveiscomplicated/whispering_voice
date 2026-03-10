@@ -26,11 +26,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 # Mapping: alias (valid Python identifier) → actual module name
 _STAGE_ALIASES: dict[str, str] = {
-    "src._1_download_youtube":          "src.1_download_youtube",
-    "src._2_quality_validation_1":      "src.2_quality_validation_1",
-    "src._3_run_stt_and_vad":           "src.3_run_stt_and_vad",
-    "src._4_synthesize_noise":          "src.4_synthesize_noise",
-    "src._5_quality_validation_2":      "src.5_quality_validation_2",
+    "src._1_download_youtube": "src.1_download_youtube",
+    "src._2_quality_validation_1": "src.2_quality_validation_1",
+    "src._3_run_stt_and_vad": "src.3_run_stt_and_vad",
+    "src._4_synthesize_noise": "src.4_synthesize_noise",
+    "src._5_quality_validation_2": "src.5_quality_validation_2",
     "src._6_generate_finetuning_dataset": "src.6_generate_finetuning_dataset",
 }
 

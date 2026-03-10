@@ -21,18 +21,28 @@ import yaml
 # Test fixture helpers
 # ---------------------------------------------------------------------------
 
-def _write_wav(path: Path, duration_s: float = 2.0, sr: int = 16_000,
-               amplitude: float = 0.3) -> Path:
+
+def _write_wav(
+    path: Path, duration_s: float = 2.0, sr: int = 16_000, amplitude: float = 0.3
+) -> Path:
     """Write a sine-wave WAV file of the given duration."""
-    t = np.linspace(0, duration_s, int(sr * duration_s), endpoint=False, dtype=np.float32)
+    t = np.linspace(
+        0, duration_s, int(sr * duration_s), endpoint=False, dtype=np.float32
+    )
     audio = amplitude * np.sin(2 * np.pi * 440 * t)
     path.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(path), audio, sr)
     return path
 
 
-def _write_config(path: Path, raw_dir: str, stt_vad_dir: str,
-                  synth_dir: str, dataset_dir: str, logs_dir: str) -> Path:
+def _write_config(
+    path: Path,
+    raw_dir: str,
+    stt_vad_dir: str,
+    synth_dir: str,
+    dataset_dir: str,
+    logs_dir: str,
+) -> Path:
     cfg = {
         "youtube": {"playlist_ids": ["PLtest"], "max_videos_per_playlist": 2},
         "quality_validation": {
@@ -41,10 +51,17 @@ def _write_config(path: Path, raw_dir: str, stt_vad_dir: str,
             "min_energy_db": -60.0,
             "max_energy_db": 0.0,
         },
-        "stt": {"model": "whisper-base", "language": "ko",
-                "min_confidence": 0.85, "device": "cpu"},
-        "vad": {"model": "pyannote/segmentation",
-                "threshold": 0.5, "min_speech_duration_ms": 200},
+        "stt": {
+            "model": "whisper-base",
+            "language": "ko",
+            "min_confidence": 0.85,
+            "device": "cpu",
+        },
+        "vad": {
+            "model": "pyannote/segmentation",
+            "threshold": 0.5,
+            "min_speech_duration_ms": 200,
+        },
         "synthesis": {
             "snr_levels_db": [10],
             "noise_types": ["ambient"],
@@ -68,6 +85,7 @@ def _write_config(path: Path, raw_dir: str, stt_vad_dir: str,
 # ---------------------------------------------------------------------------
 # Shared fixture: tmp-dir workspace
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def workspace(tmp_path) -> dict[str, Path]:
@@ -115,6 +133,7 @@ def workspace(tmp_path) -> dict[str, Path]:
 # Stage 2: Quality Validation 1
 # ---------------------------------------------------------------------------
 
+
 class TestStage2QualityValidation1:
     def test_valid_files_pass(self, workspace):
         from src._2_quality_validation_1 import QualityValidator1  # noqa: PLC0415
@@ -122,14 +141,16 @@ class TestStage2QualityValidation1:
 
         cfg_path = str(workspace["config"])
         from src.utils.config import load_config
+
         config = load_config(cfg_path)
 
         validator = QualityValidator1(config=config, logger=logging.getLogger("t"))
         df = validator.validate_batch(str(workspace["raw"]))
 
         # Only WAVs in raw/ (noise sub-dir is excluded from direct listing)
-        wav_count = sum(1 for p in workspace["raw"].iterdir()
-                        if p.is_file() and p.suffix == ".wav")
+        wav_count = sum(
+            1 for p in workspace["raw"].iterdir() if p.is_file() and p.suffix == ".wav"
+        )
         assert len(df) == wav_count
         assert df["passed"].all(), df[~df["passed"]][["file_path", "failure_reasons"]]
 
@@ -153,6 +174,7 @@ class TestStage2QualityValidation1:
 # ---------------------------------------------------------------------------
 # Stage 4: Noise Synthesis
 # ---------------------------------------------------------------------------
+
 
 class TestStage4NoiseSynthesis:
     def test_wav_files_created(self, workspace):
@@ -197,6 +219,7 @@ class TestStage4NoiseSynthesis:
 # Stage 5: Quality Validation 2
 # ---------------------------------------------------------------------------
 
+
 class TestStage5QualityValidation2:
     def _prepare_synth_files(self, workspace):
         """Pre-populate synthesized/ with WAV + JSON sidecar pairs."""
@@ -216,9 +239,12 @@ class TestStage5QualityValidation2:
                 "target_snr_db": 10.0,
                 "fade_duration_ms": 50,
                 "audio_characteristics": {
-                    "format": "wav", "sample_rate": 16_000,
-                    "channels": 1, "duration_ms": 2000.0,
-                    "rms_energy_db": -20.0, "peak_amplitude": 0.9,
+                    "format": "wav",
+                    "sample_rate": 16_000,
+                    "channels": 1,
+                    "duration_ms": 2000.0,
+                    "rms_energy_db": -20.0,
+                    "peak_amplitude": 0.9,
                 },
             }
             with open(wav_path.with_suffix(".json"), "w") as f:
@@ -242,6 +268,7 @@ class TestStage5QualityValidation2:
 # ---------------------------------------------------------------------------
 # Stage 6: Dataset Generation
 # ---------------------------------------------------------------------------
+
 
 class TestStage6DatasetGeneration:
     def _populate_stage3_metadata(self, workspace):
@@ -267,9 +294,12 @@ class TestStage6DatasetGeneration:
                     "speech_ratio": 0.75,
                 },
                 "audio_characteristics": {
-                    "format": "wav", "sample_rate": 16_000,
-                    "channels": 1, "duration_ms": 2000.0,
-                    "rms_energy_db": -18.0, "peak_amplitude": 0.85,
+                    "format": "wav",
+                    "sample_rate": 16_000,
+                    "channels": 1,
+                    "duration_ms": 2000.0,
+                    "rms_energy_db": -18.0,
+                    "peak_amplitude": 0.85,
                 },
             }
             with open(meta_dir / f"{audio_id}_metadata.json", "w") as f:
@@ -290,13 +320,19 @@ class TestStage6DatasetGeneration:
             meta = {
                 "audio_id": audio_id,
                 "source_asmr": str(workspace["raw"] / f"{audio_id}.wav"),
-                "source_noise": str(workspace["raw"] / "noise" / "ambient" / "amb_001.wav"),
+                "source_noise": str(
+                    workspace["raw"] / "noise" / "ambient" / "amb_001.wav"
+                ),
                 "noise_type": "ambient",
                 "target_snr_db": 10.0,
                 "fade_duration_ms": 50,
                 "audio_characteristics": {
-                    "format": "wav", "sample_rate": 16_000, "channels": 1,
-                    "duration_ms": 2000.0, "rms_energy_db": -20.0, "peak_amplitude": 0.9,
+                    "format": "wav",
+                    "sample_rate": 16_000,
+                    "channels": 1,
+                    "duration_ms": 2000.0,
+                    "rms_energy_db": -20.0,
+                    "peak_amplitude": 0.9,
                 },
             }
             with open(wav.with_suffix(".json"), "w") as f:
@@ -339,13 +375,14 @@ class TestStage6DatasetGeneration:
         )
 
         all_splits = list(workspace["dataset"].iterdir())
-        jsonl_count = sum(
-            1 for p in workspace["dataset"].rglob("metadata.jsonl")
-        )
+        jsonl_count = sum(1 for p in workspace["dataset"].rglob("metadata.jsonl"))
         assert jsonl_count > 0, "No metadata.jsonl files were created"
 
     def test_jsonl_entries_have_required_fields(self, workspace):
-        from src._6_generate_finetuning_dataset import FinetuningDatasetGenerator, _read_jsonl
+        from src._6_generate_finetuning_dataset import (
+            FinetuningDatasetGenerator,
+            _read_jsonl,
+        )
         import logging
         from src.utils.config import load_config
 
@@ -370,6 +407,7 @@ class TestStage6DatasetGeneration:
 # ---------------------------------------------------------------------------
 # Pipeline Checkpoint
 # ---------------------------------------------------------------------------
+
 
 class TestPipelineCheckpoint:
     def test_save_and_load_roundtrip(self, workspace):

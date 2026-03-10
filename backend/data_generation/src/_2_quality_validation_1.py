@@ -48,6 +48,7 @@ _EXPECTED_SAMPLE_RATE = 16_000
 # Result dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ValidationResult:
     """Holds the outcome of a single audio file validation.
@@ -87,13 +88,16 @@ class ValidationResult:
             semicolon-separated string.
         """
         d = asdict(self)
-        d["failure_reasons"] = "; ".join(self.failure_reasons) if self.failure_reasons else ""
+        d["failure_reasons"] = (
+            "; ".join(self.failure_reasons) if self.failure_reasons else ""
+        )
         return d
 
 
 # ---------------------------------------------------------------------------
 # Validator
 # ---------------------------------------------------------------------------
+
 
 class QualityValidator1:
     """Validate downloaded audio files before STT / VAD processing.
@@ -157,7 +161,8 @@ class QualityValidator1:
             raise NotADirectoryError(f"Input directory not found: {directory}")
 
         audio_files = sorted(
-            p for p in dir_path.iterdir()
+            p
+            for p in dir_path.iterdir()
             if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS
         )
 
@@ -210,9 +215,7 @@ class QualityValidator1:
         self._logger.info(f"CSV report saved: {out}")
 
         # Passing files JSON
-        passed_paths = [
-            r.file_path for r in self._results if r.passed
-        ]
+        passed_paths = [r.file_path for r in self._results if r.passed]
         json_path = out.with_name(out.stem + "_passed.json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(
@@ -273,9 +276,7 @@ class QualityValidator1:
         result.sample_rate = sr
         result.sample_rate_ok = sr == _EXPECTED_SAMPLE_RATE
         if not result.sample_rate_ok:
-            reasons.append(
-                f"sample rate {sr} Hz (expected {_EXPECTED_SAMPLE_RATE} Hz)"
-            )
+            reasons.append(f"sample rate {sr} Hz (expected {_EXPECTED_SAMPLE_RATE} Hz)")
 
         # 4. Duration check
         duration_ms = len(audio) / sr * 1_000
@@ -290,7 +291,7 @@ class QualityValidator1:
             )
 
         # 5. RMS energy check
-        rms = float(np.sqrt(np.mean(audio ** 2)))
+        rms = float(np.sqrt(np.mean(audio**2)))
         rms_db = 20.0 * np.log10(rms + 1e-9)
         result.rms_energy_db = rms_db
         result.energy_ok = self._min_energy_db <= rms_db <= self._max_energy_db
@@ -308,6 +309,7 @@ class QualityValidator1:
 # ---------------------------------------------------------------------------
 # CLI entry-point
 # ---------------------------------------------------------------------------
+
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(

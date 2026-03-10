@@ -21,6 +21,7 @@ from src._4_synthesize_noise import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def config() -> dict:
     return {
@@ -41,6 +42,7 @@ def config() -> dict:
 @pytest.fixture()
 def synth(config) -> NoiseSynthesizer:
     import logging
+
     return NoiseSynthesizer(config=config, logger=logging.getLogger("test"))
 
 
@@ -68,6 +70,7 @@ def noise_wav(tmp_path) -> str:
 # ---------------------------------------------------------------------------
 # DSP helpers
 # ---------------------------------------------------------------------------
+
 
 class TestRms:
     def test_silent_is_zero(self):
@@ -135,6 +138,7 @@ class TestLoopToLength:
 # NoiseSynthesizer.calculate_snr
 # ---------------------------------------------------------------------------
 
+
 class TestCalculateSnr:
     def test_equal_rms_gives_0db(self, synth):
         audio = np.ones(16_000, dtype=np.float32)
@@ -159,6 +163,7 @@ class TestCalculateSnr:
 # ---------------------------------------------------------------------------
 # NoiseSynthesizer.synthesize
 # ---------------------------------------------------------------------------
+
 
 class TestSynthesize:
     def test_output_is_float32(self, synth, tone_wav, noise_wav):
@@ -205,14 +210,15 @@ class TestSynthesize:
         sig = _loop_to_length(signal, len(mixed))
         measured = synth.calculate_snr(sig, mixed - sig)
         # Allow ±4 dB — peak-normalisation shifts the absolute levels
-        assert abs(measured - target_snr) < 4.0, (
-            f"SNR mismatch: target={target_snr}, measured={measured:.1f}"
-        )
+        assert (
+            abs(measured - target_snr) < 4.0
+        ), f"SNR mismatch: target={target_snr}, measured={measured:.1f}"
 
 
 # ---------------------------------------------------------------------------
 # synthesize_batch — output structure
 # ---------------------------------------------------------------------------
+
 
 class TestSynthesizeBatch:
     def test_creates_output_files(self, synth, tmp_path, tone_wav, noise_wav):
@@ -223,6 +229,7 @@ class TestSynthesizeBatch:
         out_dir = tmp_path / "out"
 
         import shutil
+
         shutil.copy(tone_wav, asmr_dir / "asmr_001.wav")
         shutil.copy(noise_wav, noise_dir / "amb_001.wav")
 
@@ -246,6 +253,7 @@ class TestSynthesizeBatch:
         out_dir = tmp_path / "out"
 
         import shutil
+
         shutil.copy(tone_wav, asmr_dir / "asmr_002.wav")
         shutil.copy(noise_wav, noise_dir / "amb_002.wav")
 
@@ -277,8 +285,9 @@ class TestSynthesizeBatch:
         shutil.copy(tone_wav, asmr_dir / "asmr_003.wav")
         shutil.copy(noise_wav, noise_dir / "amb_003.wav")
 
-        synth.synthesize_batch(str(asmr_dir), str(tmp_path / "noise"),
-                               [10.0], str(out_dir))
+        synth.synthesize_batch(
+            str(asmr_dir), str(tmp_path / "noise"), [10.0], str(out_dir)
+        )
         wav_files = list(out_dir.rglob("*.wav"))
         assert wav_files
 
@@ -286,8 +295,9 @@ class TestSynthesizeBatch:
         mtimes = {p: p.stat().st_mtime for p in wav_files}
 
         # Second run
-        synth.synthesize_batch(str(asmr_dir), str(tmp_path / "noise"),
-                               [10.0], str(out_dir))
+        synth.synthesize_batch(
+            str(asmr_dir), str(tmp_path / "noise"), [10.0], str(out_dir)
+        )
 
         for p in wav_files:
             assert p.stat().st_mtime == mtimes[p], f"File was overwritten: {p}"
