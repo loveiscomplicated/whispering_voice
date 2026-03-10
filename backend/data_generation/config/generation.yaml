@@ -1,7 +1,7 @@
 youtube:
   playlist_ids:
     - "PL6YVF-LNNIQb_yCmKUkM-tShu-Z-DCapZ"
-  max_videos_per_playlist: 10
+  max_videos_per_playlist: 100000
 
 quality_validation:
   min_audio_length_ms: 1000
