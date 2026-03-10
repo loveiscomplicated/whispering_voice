@@ -117,7 +117,7 @@ python src/3_run_stt_and_vad.py --input-dir raw_downloads --config config/genera
 ### Transcription quality is poor
 
 1. **Check confidence scores** — the CSV report at
-   `logs/quality_validation_1_report.csv` shows per-file RMS energy. Very
+   `logs/quality_validation_strict_report.csv` shows per-file RMS energy. Very
    quiet files (< −40 dBFS) produce unreliable transcripts.
 
 2. **Lower the confidence threshold cautiously:**
@@ -133,8 +133,9 @@ python src/3_run_stt_and_vad.py --input-dir raw_downloads --config config/genera
      model: "whisper-small"
    ```
 
-4. **Verify the audio is 16 kHz mono** — Stage 2 (`quality_validation_1`)
-   will flag files with wrong sample rates.
+4. **Verify the audio is 16 kHz mono** — Stage 4 (`quality_validation_strict`)
+   enforces 16 kHz and will reject files with wrong sample rates. Stage 3
+   (preprocessing) resamples all files to 16 kHz automatically.
 
 ---
 
@@ -173,10 +174,10 @@ Possible causes:
 
 | Cause | Fix |
 |-------|-----|
-| Audio is truly silent | Check `rms_energy_db` in Stage 2 report |
+| Audio is truly silent | Check `rms_energy_db` in Stage 4 strict report |
 | Threshold too high | Lower `vad.threshold` from 0.5 to 0.3 in config |
 | `min_speech_duration_ms` too high | Lower from 300 to 100 |
-| Wrong audio format | Ensure 16 kHz mono WAV going into Stage 3 |
+| Wrong audio format | Ensure 16 kHz mono WAV going into Stage 5; Stage 3 preprocessing handles resampling automatically |
 
 ---
 
@@ -202,7 +203,7 @@ raw_downloads/noise/
 The synthesizer peak-normalises the output, so true hard clipping should not
 occur. If the waveform *sounds* distorted:
 
-1. Check the source ASMR is not already distorted (Stage 2 energy check).
+1. Check the source ASMR is not already distorted (Stage 4 strict energy check).
 2. Use a higher SNR level — at very low SNR (e.g. 0 dB) the noise dominates.
 3. Verify noise files are not themselves clipping:
    ```bash
@@ -215,13 +216,19 @@ occur. If the waveform *sounds* distorted:
 
 ### `ValueError: Clean signal is silent`
 
-The ASMR source file has near-zero RMS. This file was likely not caught by
-Stage 2 (check `min_energy_db` in config — default −40 dBFS). Manually
-remove the file or tighten the threshold:
+The ASMR source file has near-zero RMS. This can happen if:
+
+- Stage 3 preprocessing failed to normalise the file (check `logs/3_preprocessing.log`).
+- The file passed Stage 4 strict validation despite low energy (check `min_energy_db`).
+
+Tighten the strict energy threshold or the preprocessing target level:
 
 ```yaml
-quality_validation:
+quality_validation_strict:
   min_energy_db: -35   # more aggressive silence rejection
+
+preprocessing:
+  target_rms_db: -20   # ensure files are normalised to a reasonable level
 ```
 
 ---
@@ -230,30 +237,31 @@ quality_validation:
 
 ### Empty splits (train/val/test are empty)
 
-Stage 6 requires audio files to be physically present. Confirm:
+Stage 7 requires audio files to be physically present in `stt_and_vad/`.
+Stage 5 copies them there automatically from `final_files/`. Confirm:
 
 ```bash
-# Stage 3 output: check WAV files exist in stt_and_vad/
-ls stt_and_vad/*.wav
+# Stage 5 output: check WAV files exist in stt_and_vad/
+ls backend/data_generation/stt_and_vad/*.wav
 
-# Stage 4 output: check synthesized WAVs exist
-find synthesized/ -name "*.wav" | head -5
+# Stage 6 output: check synthesized WAVs exist
+find backend/data_generation/synthesized/ -name "*.wav" | head -5
 ```
 
-If Stage 3 didn't copy WAVs, copy them manually:
+If Stage 5 didn't copy WAVs, copy them manually:
 ```bash
-cp raw_downloads/*.wav stt_and_vad/
+cp backend/data_generation/final_files/*.wav backend/data_generation/stt_and_vad/
 ```
 
 ### `metadata.jsonl` is missing transcripts
 
-Transcripts come from Stage 3 metadata JSONs in `stt_and_vad/metadata/`.
-If the directory is empty, re-run Stage 3:
+Transcripts come from Stage 5 metadata JSONs in `stt_and_vad/metadata/`.
+If the directory is empty, re-run from Stage 5:
 
 ```bash
-python src/data_generation_pipeline.py \
-    --config config/generation.yaml \
-    --start-stage 3
+python backend/data_generation/src/data_generation_pipeline.py \
+    --config ./backend/data_generation/config/generation.yaml \
+    --start-stage 5
 ```
 
 ---
@@ -262,16 +270,16 @@ python src/data_generation_pipeline.py \
 
 ### `ModuleNotFoundError: No module named 'src'`
 
-Run scripts from the project root (`data_generation/`), not from inside `src/`:
+Run scripts from the project root (the directory that contains `backend/`), not from inside `src/`:
 
 ```bash
-# Correct
-cd path/to/data_generation
-python src/1_download_youtube.py --config config/generation.yaml
+# Correct — run from repo root
+python backend/data_generation/src/_1_download_youtube.py \
+    --config ./backend/data_generation/config/generation.yaml
 
 # Wrong
-cd src
-python 1_download_youtube.py ...
+cd backend/data_generation/src
+python _1_download_youtube.py ...
 ```
 
 ### `SyntaxError` when importing stage modules in tests
@@ -306,14 +314,24 @@ All stage logs are written to `logs/`:
 
 | File | Stage |
 |------|-------|
-| `logs/1_download_youtube.log` | Stage 1 |
-| `logs/2_quality_validation_1.log` | Stage 2 |
-| `logs/3_run_stt_and_vad.log` | Stage 3 |
-| `logs/4_synthesize_noise.log` | Stage 4 |
-| `logs/5_quality_validation_2.log` | Stage 5 |
-| `logs/6_generate_finetuning_dataset.log` | Stage 6 |
+| `logs/1_download_youtube.log` | Stage 1 — Download |
+| `logs/2_quality_validation_basic.log` | Stage 2 — Basic validation |
+| `logs/3_preprocessing.log` | Stage 3 — Preprocessing |
+| `logs/4_quality_validation_strict.log` | Stage 4 — Strict validation |
+| `logs/3_run_stt_and_vad.log` | Stage 5 — STT + VAD |
+| `logs/4_synthesize_noise.log` | Stage 6 — Noise synthesis |
+| `logs/6_generate_finetuning_dataset.log` | Stage 7 — Dataset generation |
 | `logs/pipeline.log` | Orchestrator |
 | `logs/pipeline_checkpoint.json` | Resume state |
+
+Key CSV + JSON reports:
+
+| File | Contents |
+|------|----------|
+| `logs/quality_validation_basic_report.csv` | Per-file basic validation results |
+| `logs/quality_validation_basic_report_passed.json` | Paths that passed Stage 2 |
+| `logs/quality_validation_strict_report.csv` | Per-file strict validation results |
+| `logs/quality_validation_strict_report_passed.json` | Paths that passed Stage 4 (fed into Stage 5) |
 
 Increase log verbosity by changing the level in `setup_logger`:
 

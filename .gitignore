@@ -80,3 +80,5 @@ backend/data_generation/logs/           # 로그 파일
 models/generated/raw/
 models/generated/processed/
 models/generated/finetuning_datasets/
+backend/data_generation/raw_downloads
+.coverage.jeong-yunseong-ui-MacBookPro_local.pid21011.X9M6cSux.HNQIp837rWOh

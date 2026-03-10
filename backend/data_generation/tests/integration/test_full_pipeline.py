@@ -42,6 +42,11 @@ def _write_config(
     synth_dir: str,
     dataset_dir: str,
     logs_dir: str,
+    passed_dir: str = "",
+    rejected_dir: str = "",
+    preprocessed_dir: str = "",
+    final_files_dir: str = "",
+    val_failed_dir: str = "",
 ) -> Path:
     cfg = {
         "youtube": {"playlist_ids": ["PLtest"], "max_videos_per_playlist": 2},
@@ -50,6 +55,25 @@ def _write_config(
             "max_audio_length_ms": 60_000,
             "min_energy_db": -60.0,
             "max_energy_db": 0.0,
+        },
+        "quality_validation_basic": {
+            "min_audio_length_ms": 500,
+            "max_audio_length_ms": 600_000,
+            "min_energy_db": -80.0,
+            "check_readability": True,
+        },
+        "preprocessing": {
+            "target_sample_rate": 16_000,
+            "target_rms_db": -20.0,
+            "length_adjustment": {"min_ms": 500, "max_ms": 60_000},
+            "normalization": {"target_db": -20.0, "headroom_db": 3.0},
+        },
+        "quality_validation_strict": {
+            "min_audio_length_ms": 500,
+            "max_audio_length_ms": 60_000,
+            "min_energy_db": -60.0,
+            "max_energy_db": 0.0,
+            "require_sample_rate": 16_000,
         },
         "stt": {
             "model": "whisper-base",
@@ -69,6 +93,11 @@ def _write_config(
         },
         "output_dirs": {
             "raw_downloads": raw_dir,
+            "passed_files": passed_dir or str(Path(raw_dir).parent / "passed_files"),
+            "rejected_files": rejected_dir or str(Path(raw_dir).parent / "rejected_files"),
+            "preprocessed": preprocessed_dir or str(Path(raw_dir).parent / "preprocessed"),
+            "final_files": final_files_dir or str(Path(raw_dir).parent / "final_files"),
+            "validation_failed": val_failed_dir or str(Path(raw_dir).parent / "validation_failed"),
             "stt_and_vad": stt_vad_dir,
             "synthesized": synth_dir,
             "dataset": dataset_dir,
@@ -91,13 +120,19 @@ def _write_config(
 def workspace(tmp_path) -> dict[str, Path]:
     """Create a minimal pipeline workspace with two sample WAV files."""
     raw = tmp_path / "raw_downloads"
+    passed = tmp_path / "passed_files"
+    rejected = tmp_path / "rejected_files"
+    preprocessed = tmp_path / "preprocessed"
+    final_files = tmp_path / "final_files"
+    val_failed = tmp_path / "validation_failed"
     stt_vad = tmp_path / "stt_and_vad"
     synth = tmp_path / "synthesized"
     dataset = tmp_path / "dataset"
     logs = tmp_path / "logs"
     cfg_dir = tmp_path / "config"
 
-    for d in (raw, stt_vad, synth, dataset, logs, cfg_dir):
+    for d in (raw, passed, rejected, preprocessed, final_files, val_failed,
+              stt_vad, synth, dataset, logs, cfg_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     # Two ASMR WAVs
@@ -116,11 +151,21 @@ def workspace(tmp_path) -> dict[str, Path]:
         synth_dir=str(synth),
         dataset_dir=str(dataset),
         logs_dir=str(logs),
+        passed_dir=str(passed),
+        rejected_dir=str(rejected),
+        preprocessed_dir=str(preprocessed),
+        final_files_dir=str(final_files),
+        val_failed_dir=str(val_failed),
     )
 
     return {
         "root": tmp_path,
         "raw": raw,
+        "passed": passed,
+        "rejected": rejected,
+        "preprocessed": preprocessed,
+        "final_files": final_files,
+        "val_failed": val_failed,
         "stt_vad": stt_vad,
         "synth": synth,
         "dataset": dataset,
@@ -130,7 +175,7 @@ def workspace(tmp_path) -> dict[str, Path]:
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: Quality Validation 1
+# Stage 2: Quality Validation 1 (unchanged — kept for backward compat)
 # ---------------------------------------------------------------------------
 
 
@@ -216,7 +261,7 @@ class TestStage4NoiseSynthesis:
 
 
 # ---------------------------------------------------------------------------
-# Stage 5: Quality Validation 2
+# Stage 5: Quality Validation 2 (unchanged — kept for backward compat)
 # ---------------------------------------------------------------------------
 
 
@@ -450,4 +495,4 @@ class TestPipelineCheckpoint:
         with pytest.raises(ValueError):
             pipeline.run(start_stage=0)
         with pytest.raises(ValueError):
-            pipeline.run(start_stage=7)
+            pipeline.run(start_stage=8)

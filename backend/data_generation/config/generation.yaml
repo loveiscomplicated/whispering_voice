@@ -1,13 +1,37 @@
 youtube:
   playlist_ids:
     - "PL6YVF-LNNIQb_yCmKUkM-tShu-Z-DCapZ"
-  max_videos_per_playlist: 100000
+  max_videos_per_playlist: 1 # 1 for debug
 
 quality_validation:
   min_audio_length_ms: 1000
   max_audio_length_ms: 30000
   min_energy_db: -40
   max_energy_db: -10
+
+quality_validation_basic:
+  min_audio_length_ms: 500
+  max_audio_length_ms: 600000
+  min_energy_db: -80
+  check_readability: true
+
+preprocessing:
+  target_sample_rate: 16000
+  target_rms_db: -20
+  length_adjustment:
+    min_ms: 1000
+    max_ms: 30000
+  normalization:
+    method: "rms"
+    target_db: -20
+    headroom_db: 3
+
+quality_validation_strict:
+  min_audio_length_ms: 1000
+  max_audio_length_ms: 30000
+  min_energy_db: -40
+  max_energy_db: -10
+  require_sample_rate: 16000
 
 stt:
   model: "whisper-base"
@@ -30,10 +54,15 @@ synthesis:
 
 output_dirs:
   raw_downloads: "./backend/data_generation/raw_downloads"
+  passed_files: "./backend/data_generation/passed_files"
+  rejected_files: "./backend/data_generation/rejected_files"
+  preprocessed: "./backend/data_generation/preprocessed"
+  final_files: "./backend/data_generation/final_files"
+  validation_failed: "./backend/data_generation/validation_failed"
   stt_and_vad: "./backend/data_generation/stt_and_vad"
   synthesized: "./backend/data_generation/synthesized"
   dataset: "./backend/data_generation/dataset"
-  logs: "./logs"
+  logs: "../backend/data_generation/logs"
 
 reproducibility:
   seed: 42

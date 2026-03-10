@@ -187,9 +187,10 @@ class NoiseSynthesizer:
         scale = rms_signal / (rms_noise * 10 ** (snr_db / 20.0))
         mixed = signal + noise * scale
 
-        # Peak-normalise to [-1, 1] to prevent clipping
+        # Peak-normalise only when the mix would actually clip; leaving a
+        # sub-unity mix untouched preserves the signal/noise ratio intact.
         peak = np.max(np.abs(mixed))
-        if peak > 1e-9:
+        if peak > 1.0:
             mixed = mixed / peak
 
         return mixed.astype(np.float32)

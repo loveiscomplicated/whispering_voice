@@ -122,10 +122,10 @@ https://www.youtube.com/playlist?list=PLxxxxxxxxxxxxxxxx
 
 ## 6. Prepare Noise Files
 
-The synthesis stage (Stage 4) requires background noise samples organised by type:
+The synthesis stage (Stage 6) requires background noise samples organised by type:
 
 ```
-raw_downloads/noise/
+backend/data_generation/raw_downloads/noise/
 ├── ambient/    ← café, nature, indoor ambience (WAV/MP3)
 ├── traffic/    ← road, street sounds
 └── office/     ← keyboard, AC, ventilation
@@ -139,7 +139,7 @@ Free sources:
 
 ## 7. First Run
 
-### Full pipeline (all 6 stages)
+### Full pipeline (all 7 stages)
 ```bash
 python backend/data_generation/src/data_generation_pipeline.py --config ./backend/data_generation/config/generation.yaml
 ```
@@ -147,32 +147,53 @@ python backend/data_generation/src/data_generation_pipeline.py --config ./backen
 ### Run individual stages
 ```bash
 # Stage 1: Download audio
-python backend/data_generation/src/_1_download_youtube.py --config .backend/data_generation/config/generation.yaml
+python backend/data_generation/src/_1_download_youtube.py \
+    --config ./backend/data_generation/config/generation.yaml
 
-# Stage 2: Pre-processing validation
-python backend/data_generation/src/_2_quality_validation_1.py \
-    --input-dir raw_downloads \
-    --config .backend/data_generation/config/generation.yaml
+# Stage 2: Basic quality validation (loose checks on raw downloads)
+python backend/data_generation/src/_2_quality_validation_basic.py \
+    --input-dir ./backend/data_generation/raw_downloads \
+    --config ./backend/data_generation/config/generation.yaml \
+    --copy-files
 
-# Stage 3: STT + VAD
-python backend/data_generation/src/3_run_stt_and_vad.py \
-    --input-dir raw_downloads \
-    --config .backend/data_generation/config/generation.yaml \
-    --passed-json logs/quality_validation_1_report_passed.json
+# Stage 3: Preprocessing (resample, normalise, length-adjust)
+python backend/data_generation/src/_3_preprocessing.py \
+    --input-dir ./backend/data_generation/passed_files \
+    --output-dir ./backend/data_generation/preprocessed \
+    --config ./backend/data_generation/config/generation.yaml
 
-# Stage 4: Noise synthesis
-python backend/data_generation/src/_4_synthesize_noise.py --config .backend/data_generation/config/generation.yaml
+# Stage 4: Strict quality validation (16 kHz, 1–30 s, energy range)
+python backend/data_generation/src/_4_quality_validation_strict.py \
+    --input-dir ./backend/data_generation/preprocessed \
+    --config ./backend/data_generation/config/generation.yaml \
+    --copy-files
 
-# Stage 5: Post-processing validation
-python backend/data_generation/src/_5_quality_validation_2.py --config .backend/data_generation/config/generation.yaml
+# Stage 5: STT + VAD
+python backend/data_generation/src/_3_run_stt_and_vad.py \
+    --input-dir ./backend/data_generation/final_files \
+    --config ./backend/data_generation/config/generation.yaml \
+    --passed-json ./backend/data_generation/logs/quality_validation_strict_report_passed.json
 
-# Stage 6: Dataset generation
-python backend/data_generation/src/_6_generate_finetuning_dataset.py --config .backend/data_generation/config/generation.yaml
+# Stage 6: Noise synthesis
+python backend/data_generation/src/_4_synthesize_noise.py \
+    --config ./backend/data_generation/config/generation.yaml
+
+# Stage 7: Dataset generation
+python backend/data_generation/src/_6_generate_finetuning_dataset.py \
+    --config ./backend/data_generation/config/generation.yaml
 ```
 
 ### Resume after interruption
 ```bash
-python src/data_generation_pipeline.py --config .backend/data_generation/config/generation.yaml --resume
+python backend/data_generation/src/data_generation_pipeline.py --config ./backend/data_generation/config/generation.yaml --resume
+```
+
+### Start from a specific stage
+```bash
+# Re-run from Stage 3 onwards (e.g. after tweaking preprocessing config)
+python backend/data_generation/src/data_generation_pipeline.py \
+    --config ./backend/data_generation/config/generation.yaml \
+    --start-stage 3
 ```
 
 ---
@@ -197,16 +218,21 @@ pytest backend/data_generation/tests/ -v --cov=src --cov-report=term-missing
 After a successful full run:
 
 ```
-raw_downloads/          # Stage 1: original audio + per-video metadata JSON
+raw_downloads/              # Stage 1: original audio + per-video metadata JSON
+passed_files/               # Stage 2: files that passed basic validation
+rejected_files/             # Stage 2: files rejected at basic validation
+preprocessed/               # Stage 3: resampled, normalised, length-adjusted WAVs
+final_files/                # Stage 4: files that passed strict validation
+validation_failed/          # Stage 4: files rejected at strict validation
 stt_and_vad/
-  metadata/             # Stage 3: STT + VAD metadata per file
-  manifest.json         # index of all processed files
+  metadata/                 # Stage 5: STT + VAD metadata per file
+  manifest.json             # index of all processed files
 synthesized/
-  snr_05/ambient/       # Stage 4: noise-mixed WAVs + JSON sidecars
+  snr_05/ambient/           # Stage 6: noise-mixed WAVs + JSON sidecars
   snr_10/ambient/
   …
 dataset/
-  train/audio/          # Stage 6: final fine-tuning data
+  train/audio/              # Stage 7: final fine-tuning data
   train/metadata.jsonl
   val/audio/
   val/metadata.jsonl
@@ -214,5 +240,5 @@ dataset/
   test/metadata.jsonl
   manifest.json
   statistics.json
-logs/                   # per-stage log files + CSV reports + checkpoint
+logs/                       # per-stage log files + CSV reports + checkpoint
 ```

@@ -122,3 +122,4 @@ Chosen over `youtube-dl` because:
 | 2024-03 | Pyannote v2.1 selected | Best open-source VAD accuracy at time of evaluation |
 | 2024-03 | SNR range 5–25 dB selected | Covers real-world conditions from very noisy (5 dB) to near-clean (25 dB) |
 | 2024-03 | 8:1:1 train/val/test split | Standard for fine-tuning datasets; grouping by audio_id prevents leakage |
+| 2026-03 | Split Stage 2 into Basic + Preprocessing + Strict (Stages 2–4) | Old single validator rejected ~95% of raw downloads due to strict 16 kHz / energy checks on unprocessed audio; inserting a preprocessing stage before strict validation eliminates false rejections |

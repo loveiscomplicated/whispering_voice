@@ -206,12 +206,15 @@ class TestSynthesize:
         mixed = synth.synthesize(tone_wav, noise_wav, snr_db=target_snr)
         signal, _ = sf.read(tone_wav, dtype="float32")
 
-        # Pad / trim to same length as mixed
+        # Pad / trim to same length as mixed, then apply the same 50 ms fade
+        # that synthesize() applies internally so that (mixed - sig_faded)
+        # isolates the pure scaled-noise component without a fade-edge residual.
         sig = _loop_to_length(signal, len(mixed))
-        measured = synth.calculate_snr(sig, mixed - sig)
-        # Allow ±4 dB — peak-normalisation shifts the absolute levels
+        sig_faded = _apply_fade(sig.copy(), 16_000, 50.0)
+        measured = synth.calculate_snr(sig_faded, mixed - sig_faded)
+        # Allow ±1 dB — residual from float32 arithmetic only
         assert (
-            abs(measured - target_snr) < 4.0
+            abs(measured - target_snr) < 1.0
         ), f"SNR mismatch: target={target_snr}, measured={measured:.1f}"
 
 

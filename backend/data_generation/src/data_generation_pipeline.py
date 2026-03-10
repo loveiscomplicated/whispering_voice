@@ -1,6 +1,6 @@
 """Full data-generation pipeline orchestrator.
 
-Connects all six stages into a single, resumable pipeline.  After each stage
+Connects all seven stages into a single, resumable pipeline.  After each stage
 completes, a JSON checkpoint is written so that the pipeline can be restarted
 from any point without re-doing earlier work.
 
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,7 +40,7 @@ from src.utils.logger import setup_logger  # noqa: E402
 # ML libraries (whisper, pyannote) until they are actually needed.
 
 _CHECKPOINT_FILENAME = "pipeline_checkpoint.json"
-_TOTAL_STAGES = 6
+_TOTAL_STAGES = 7
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,7 @@ _TOTAL_STAGES = 6
 
 
 class DataGenerationPipeline:
-    """Orchestrate the six-stage STT data-generation pipeline.
+    """Orchestrate the seven-stage STT data-generation pipeline.
 
     Args:
         config_path: Path to ``generation.yaml``.
@@ -75,19 +76,39 @@ class DataGenerationPipeline:
         out_dirs = self._config.get("output_dirs", {})
         self._raw_dir: str = out_dirs.get(
             "raw_downloads",
-            "./backend/data_generation/raw_downloads",  # Assuming the script is run from root.
+            "./backend/data_generation/raw_downloads",
+        )
+        self._passed_dir: str = out_dirs.get(
+            "passed_files",
+            "./backend/data_generation/passed_files",
+        )
+        self._rejected_dir: str = out_dirs.get(
+            "rejected_files",
+            "./backend/data_generation/rejected_files",
+        )
+        self._preprocessed_dir: str = out_dirs.get(
+            "preprocessed",
+            "./backend/data_generation/preprocessed",
+        )
+        self._final_files_dir: str = out_dirs.get(
+            "final_files",
+            "./backend/data_generation/final_files",
+        )
+        self._val_failed_dir: str = out_dirs.get(
+            "validation_failed",
+            "./backend/data_generation/validation_failed",
         )
         self._stt_vad_dir: str = out_dirs.get(
             "stt_and_vad",
-            "./backend/data_generation/stt_and_vad",  # Assuming the script is run from root.
+            "./backend/data_generation/stt_and_vad",
         )
         self._synth_dir: str = out_dirs.get(
             "synthesized",
-            "./backend/data_generation/synthesized",  # Assuming the script is run from root.
+            "./backend/data_generation/synthesized",
         )
         self._dataset_dir: str = out_dirs.get(
             "dataset",
-            "./backend/data_generation/dataset",  # Assuming the script is run from root.
+            "./backend/data_generation/dataset",
         )
         self._logs_dir: str = logs_dir
 
@@ -98,10 +119,10 @@ class DataGenerationPipeline:
     # ------------------------------------------------------------------
 
     def run(self, start_stage: int = 1) -> bool:
-        """Execute pipeline stages from *start_stage* to 6.
+        """Execute pipeline stages from *start_stage* to 7.
 
         Args:
-            start_stage: First stage to execute (1-6).
+            start_stage: First stage to execute (1-7).
 
         Returns:
             ``True`` if every stage from *start_stage* onward succeeded,
@@ -248,15 +269,17 @@ class DataGenerationPipeline:
           and returns a details dict.
 
         Returns:
-            Ordered list of stage descriptors (1 through 6).
+            Ordered list of stage descriptors (1 through 7).
         """
+        # fmt: off
         return [
-            {"number": 1, "name": "YouTube Download", "runner": self._run_stage_1},
-            {"number": 2, "name": "Quality Validation 1", "runner": self._run_stage_2},
-            {"number": 3, "name": "STT + VAD Processing", "runner": self._run_stage_3},
-            {"number": 4, "name": "Noise Synthesis", "runner": self._run_stage_4},
-            {"number": 5, "name": "Quality Validation 2", "runner": self._run_stage_5},
-            {"number": 6, "name": "Dataset Generation", "runner": self._run_stage_6},
+            {"number": 1, "name": "YouTube Download",          "runner": self._run_stage_1},
+            {"number": 2, "name": "Quality Validation Basic",  "runner": self._run_stage_2,},
+            {"number": 3, "name": "Preprocessing",             "runner": self._run_stage_3},
+            {"number": 4, "name": "Quality Validation Strict", "runner": self._run_stage_4,},
+            {"number": 5, "name": "STT + VAD Processing",      "runner": self._run_stage_5},
+            {"number": 6, "name": "Noise Synthesis",           "runner": self._run_stage_6},
+            {"number": 7, "name": "Dataset Generation",        "runner": self._run_stage_7},
         ]
 
     # Stage runners ---------------------------------------------------
@@ -282,15 +305,18 @@ class DataGenerationPipeline:
         return {"downloaded_files": len(all_paths), "output_dir": self._raw_dir}
 
     def _run_stage_2(self) -> dict[str, Any]:
-        from src._2_quality_validation_1 import (
-            QualityValidator1,
+        from src._2_quality_validation_basic import (
+            QualityValidatorBasic,
         )  # noqa: PLC0415
 
-        validator = QualityValidator1(config=self._config, logger=self._log)
+        validator = QualityValidatorBasic(config=self._config, logger=self._log)
         df = validator.validate_batch(self._raw_dir)
 
-        report_path = str(Path(self._logs_dir) / "quality_validation_1_report.csv")
-        validator.generate_report(report_path)
+        report_path = str(Path(self._logs_dir) / "quality_validation_basic_report.csv")
+        if not df.empty:
+            validator.generate_report(report_path)
+            out_dirs = self._config.get("output_dirs", {})
+            validator.copy_files(out_dirs)
 
         n_pass = int(df["passed"].sum()) if not df.empty else 0
         return {
@@ -300,18 +326,49 @@ class DataGenerationPipeline:
         }
 
     def _run_stage_3(self) -> dict[str, Any]:
+        from src._3_preprocessing import (
+            AudioPreprocessor,
+        )  # noqa: PLC0415
+
+        preprocessor = AudioPreprocessor(config=self._config, logger=self._log)
+        stats = preprocessor.process_batch(self._passed_dir, self._preprocessed_dir)
+        return stats
+
+    def _run_stage_4(self) -> dict[str, Any]:
+        from src._4_quality_validation_strict import (
+            QualityValidatorStrict,
+        )  # noqa: PLC0415
+
+        validator = QualityValidatorStrict(config=self._config, logger=self._log)
+        df = validator.validate_batch(self._preprocessed_dir)
+
+        report_path = str(Path(self._logs_dir) / "quality_validation_strict_report.csv")
+        if not df.empty:
+            validator.generate_report(report_path)
+            out_dirs = self._config.get("output_dirs", {})
+            validator.copy_files(out_dirs)
+
+        n_pass = int(df["passed"].sum()) if not df.empty else 0
+        return {
+            "total": len(df),
+            "passed": n_pass,
+            "report": report_path,
+        }
+
+    def _run_stage_5(self) -> dict[str, Any]:
         from src._3_run_stt_and_vad import (
             STTAndVADProcessor,
         )  # noqa: PLC0415
 
         processor = STTAndVADProcessor(config=self._config, logger=self._log)
 
-        # Prefer the list of files that passed Stage 2
+        # Prefer the list of files that passed Stage 4 strict validation
         passed_json = str(
-            Path(self._logs_dir) / "quality_validation_1_report_passed.json"
+            Path(self._logs_dir) / "quality_validation_strict_report_passed.json"
         )
         metadata_dir = Path(self._stt_vad_dir) / "metadata"
         metadata_dir.mkdir(parents=True, exist_ok=True)
+        Path(self._stt_vad_dir).mkdir(parents=True, exist_ok=True)
 
         if Path(passed_json).exists():
             with open(passed_json, encoding="utf-8") as f:
@@ -319,25 +376,33 @@ class DataGenerationPipeline:
             audio_files = [Path(p) for p in data.get("files", [])]
         else:
             audio_files = sorted(
-                p for p in Path(self._raw_dir).iterdir() if p.suffix.lower() == ".wav"
+                p
+                for p in Path(self._final_files_dir).iterdir()
+                if p.suffix.lower() == ".wav"
             )
 
         results: list[dict[str, Any]] = []
         for af in audio_files:
             try:
+                # Copy audio file to stt_and_vad dir so downstream stages
+                # (noise synthesis) can locate it
+                dest_wav = Path(self._stt_vad_dir) / af.name
+                if not dest_wav.exists():
+                    shutil.copy2(str(af), str(dest_wav))
+
                 meta = processor.process_audio(str(af))
                 out = metadata_dir / f"{af.stem}_metadata.json"
                 processor.save_metadata(meta, str(out))
                 results.append(meta)
             except Exception as exc:
-                self._log.error(f"Stage 3 failed for {af.name}: {exc}")
+                self._log.error(f"Stage 5 failed for {af.name}: {exc}")
 
         return {
             "processed": len(results),
             "metadata_dir": str(metadata_dir),
         }
 
-    def _run_stage_4(self) -> dict[str, Any]:
+    def _run_stage_6(self) -> dict[str, Any]:
         from src._4_synthesize_noise import (
             NoiseSynthesizer,
         )  # noqa: PLC0415
@@ -352,26 +417,7 @@ class DataGenerationPipeline:
         total = sum(len(v) for v in results.values())
         return {"synthesized_files": total, "output_dir": self._synth_dir}
 
-    def _run_stage_5(self) -> dict[str, Any]:
-        from src._5_quality_validation_2 import (
-            QualityValidator2,
-        )  # noqa: PLC0415
-
-        validator = QualityValidator2(config=self._config, logger=self._log)
-        df = validator.validate_batch(self._synth_dir)
-
-        report_path = str(Path(self._logs_dir) / "quality_validation_2_report.csv")
-        if not df.empty:
-            validator.generate_report(report_path)
-
-        n_pass = int(df["passed"].sum()) if not df.empty else 0
-        return {
-            "total": len(df),
-            "passed": n_pass,
-            "report": report_path,
-        }
-
-    def _run_stage_6(self) -> dict[str, Any]:
+    def _run_stage_7(self) -> dict[str, Any]:
         from src._6_generate_finetuning_dataset import (
             FinetuningDatasetGenerator,
         )  # noqa: PLC0415
@@ -406,7 +452,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=1,
         metavar="N",
-        help="Stage to start from (1-6). Default: 1.",
+        help="Stage to start from (1-7). Default: 1.",
     )
     group.add_argument(
         "--resume",
