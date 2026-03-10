@@ -141,38 +141,38 @@ Free sources:
 
 ### Full pipeline (all 6 stages)
 ```bash
-python src/data_generation_pipeline.py --config config/generation.yaml
+python backend/data_generation/src/data_generation_pipeline.py --config ./backend/data_generation/config/generation.yaml
 ```
 
 ### Run individual stages
 ```bash
 # Stage 1: Download audio
-python src/_1_download_youtube.py --config config/generation.yaml
+python backend/data_generation/src/_1_download_youtube.py --config .backend/data_generation/config/generation.yaml
 
 # Stage 2: Pre-processing validation
-python src/_2_quality_validation_1.py \
+python backend/data_generation/src/_2_quality_validation_1.py \
     --input-dir raw_downloads \
-    --config config/generation.yaml
+    --config .backend/data_generation/config/generation.yaml
 
 # Stage 3: STT + VAD
-python src/3_run_stt_and_vad.py \
+python backend/data_generation/src/3_run_stt_and_vad.py \
     --input-dir raw_downloads \
-    --config config/generation.yaml \
+    --config .backend/data_generation/config/generation.yaml \
     --passed-json logs/quality_validation_1_report_passed.json
 
 # Stage 4: Noise synthesis
-python src/_4_synthesize_noise.py --config config/generation.yaml
+python backend/data_generation/src/_4_synthesize_noise.py --config .backend/data_generation/config/generation.yaml
 
 # Stage 5: Post-processing validation
-python src/_5_quality_validation_2.py --config config/generation.yaml
+python backend/data_generation/src/_5_quality_validation_2.py --config .backend/data_generation/config/generation.yaml
 
 # Stage 6: Dataset generation
-python src/_6_generate_finetuning_dataset.py --config config/generation.yaml
+python backend/data_generation/src/_6_generate_finetuning_dataset.py --config .backend/data_generation/config/generation.yaml
 ```
 
 ### Resume after interruption
 ```bash
-python src/data_generation_pipeline.py --config config/generation.yaml --resume
+python src/data_generation_pipeline.py --config .backend/data_generation/config/generation.yaml --resume
 ```
 
 ---
@@ -181,13 +181,13 @@ python src/data_generation_pipeline.py --config config/generation.yaml --resume
 
 ```bash
 # All tests
-pytest tests/ -v
+pytest backend/data_generation/tests/ -v
 
 # Unit tests only (no ML models loaded)
-pytest tests/unit/ -v
+pytest backend/data_generation/tests/unit/ -v
 
 # With coverage report
-pytest tests/ -v --cov=src --cov-report=term-missing
+pytest backend/data_generation/tests/ -v --cov=src --cov-report=term-missing
 ```
 
 ---
