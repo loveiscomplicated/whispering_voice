@@ -1,7 +1,8 @@
 youtube:
   playlist_ids:
-    - "PL6YVF-LNNIQb_yCmKUkM-tShu-Z-DCapZ"
-  max_videos_per_playlist: 1 # 1 for debug
+    - "PL6YVF-LNNIQZKBcG17-p1Jh1U6X9xGj-g"
+    - "PLLA-cMc71Xr3HLMAvSQ4gmoqqsNcdo1Yj&index=21"
+  max_videos_per_playlist: 1000 # 1 for debug
 
 quality_validation:
   min_audio_length_ms: 1000
@@ -53,17 +54,11 @@ synthesis:
     office: 0.3
 
 output_dirs:
-  raw_downloads: "./backend/data_generation/raw_downloads"
-  passed_files: "./backend/data_generation/passed_files"
-  rejected_files: "./backend/data_generation/rejected_files"
-  preprocessed: "./backend/data_generation/preprocessed"
-  final_files: "./backend/data_generation/final_files"
-  validation_failed: "./backend/data_generation/validation_failed"
-  stt_and_vad: "./backend/data_generation/stt_and_vad"
-  synthesized: "./backend/data_generation/synthesized"
-  dataset: "./backend/data_generation/dataset"
-  logs: "../backend/data_generation/logs"
+  raw_downloads: "./backend/data_generation/raw_downloads/noise"
 
 reproducibility:
   seed: 42
   version: "1.0"
+
+
+# python backend/data_generation/src/_1_download_youtube.py --config ./backend/data_generation/config/noise_download.yaml

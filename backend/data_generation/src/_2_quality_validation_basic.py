@@ -114,7 +114,7 @@ class QualityValidatorBasic:
         self._qv_cfg: dict[str, Any] = config.get("quality_validation_basic", {})
 
         self._min_duration_ms: float = self._qv_cfg.get("min_audio_length_ms", 500)
-        self._max_duration_ms: float = self._qv_cfg.get("max_audio_length_ms", 600_000)
+        self._max_duration_ms: float = self._qv_cfg.get("max_audio_length_ms", 600_000_000) # fmt: skip
         self._check_readability: bool = self._qv_cfg.get("check_readability", True)
 
         self._results: list[BasicValidationResult] = []

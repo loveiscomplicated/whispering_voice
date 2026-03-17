@@ -56,7 +56,7 @@ def get_audio_info(audio: np.ndarray, sr: int) -> dict[str, Any]:
     duration_s = num_samples / sr
 
     # RMS energy; guard against all-zero audio to avoid log(0)
-    rms = float(np.sqrt(np.mean(audio ** 2)))
+    rms = float(np.sqrt(np.mean(audio**2)))
     rms_db = 20.0 * np.log10(rms + 1e-9)
 
     peak = float(np.max(np.abs(audio)))

@@ -80,7 +80,7 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
         if not env_key.startswith(prefix):
             continue
 
-        parts = env_key[len(prefix):].lower().split("_", 1)
+        parts = env_key[len(prefix) :].lower().split("_", 1)
         if len(parts) != 2:
             continue
 

@@ -101,6 +101,19 @@ def _loop_to_length(audio: np.ndarray, target_length: int) -> np.ndarray:
     return np.tile(audio, repeats)[:target_length]
 
 
+def _truncate_to_length(audio: np.ndarray, target_length: int) -> np.ndarray:
+    """Truncate *audio* to exactly *target_length* samples.
+
+    Args:
+        audio: 1-D float32 audio array.
+        target_length: Desired number of samples.
+
+    Returns:
+        Array of exactly *target_length* samples.
+    """
+    return audio[:target_length]
+
+
 # ---------------------------------------------------------------------------
 # Synthesizer
 # ---------------------------------------------------------------------------
@@ -169,6 +182,12 @@ class NoiseSynthesizer:
         target_len = max(len(signal), len(noise))
         signal = _loop_to_length(signal, target_len)
         noise = _loop_to_length(noise, target_len)
+
+        target_len = len(signal)
+        if len(noise) >= target_len:
+            signal = _truncate_to_length(signal, target_len)
+        else:
+            noise = _loop_to_length(noise, target_len)
 
         # Apply fade to both before mixing to reduce edge artefacts
         signal = _apply_fade(signal, _SAMPLE_RATE, _FADE_DURATION_MS)

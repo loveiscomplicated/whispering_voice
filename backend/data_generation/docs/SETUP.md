@@ -148,6 +148,9 @@ python backend/data_generation/src/data_generation_pipeline.py --config ./backen
 ```bash
 # Stage 1: Download audio
 python backend/data_generation/src/_1_download_youtube.py \
+    --config ./backend/data_generation/config/noise_download.yaml
+
+python backend/data_generation/src/_1_download_youtube.py \
     --config ./backend/data_generation/config/generation.yaml
 
 # Stage 2: Basic quality validation (loose checks on raw downloads)

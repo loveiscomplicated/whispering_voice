@@ -94,10 +94,13 @@ def _write_config(
         "output_dirs": {
             "raw_downloads": raw_dir,
             "passed_files": passed_dir or str(Path(raw_dir).parent / "passed_files"),
-            "rejected_files": rejected_dir or str(Path(raw_dir).parent / "rejected_files"),
-            "preprocessed": preprocessed_dir or str(Path(raw_dir).parent / "preprocessed"),
+            "rejected_files": rejected_dir
+            or str(Path(raw_dir).parent / "rejected_files"),
+            "preprocessed": preprocessed_dir
+            or str(Path(raw_dir).parent / "preprocessed"),
             "final_files": final_files_dir or str(Path(raw_dir).parent / "final_files"),
-            "validation_failed": val_failed_dir or str(Path(raw_dir).parent / "validation_failed"),
+            "validation_failed": val_failed_dir
+            or str(Path(raw_dir).parent / "validation_failed"),
             "stt_and_vad": stt_vad_dir,
             "synthesized": synth_dir,
             "dataset": dataset_dir,
@@ -131,8 +134,19 @@ def workspace(tmp_path) -> dict[str, Path]:
     logs = tmp_path / "logs"
     cfg_dir = tmp_path / "config"
 
-    for d in (raw, passed, rejected, preprocessed, final_files, val_failed,
-              stt_vad, synth, dataset, logs, cfg_dir):
+    for d in (
+        raw,
+        passed,
+        rejected,
+        preprocessed,
+        final_files,
+        val_failed,
+        stt_vad,
+        synth,
+        dataset,
+        logs,
+        cfg_dir,
+    ):
         d.mkdir(parents=True, exist_ok=True)
 
     # Two ASMR WAVs
