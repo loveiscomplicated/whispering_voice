@@ -82,3 +82,9 @@ models/generated/processed/
 models/generated/finetuning_datasets/
 backend/data_generation/raw_downloads
 .coverage.jeong-yunseong-ui-MacBookPro_local.pid21011.X9M6cSux.HNQIp837rWOh
+backend/data_generation/dataset
+backend/data_generation/final_files
+backend/data_generation/passed_files
+backend/data_generation/preprocessed
+backend/data_generation/synthesized
+backend/data_generation/stt_and_vad
