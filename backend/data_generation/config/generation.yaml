@@ -53,10 +53,15 @@ subtitle:
   cache_dir: "./backend/data_generation/subtitles"
 
 segmentation:
-  min_segment_duration_ms: 500    # discard VAD segments shorter than this
-  max_segment_duration_ms: 30000  # discard VAD segments longer than this
+  merge_max_gap_ms: 3000          # merge consecutive segments with gaps up to this
+  min_segment_duration_ms: 5000   # discard merged segments shorter than this (5s)
+  max_segment_duration_ms: 20000  # stop merging / discard segments longer than this (20s)
   padding_ms: 50                  # silence padding added to each side
   skip_low_confidence: false      # set true to skip files flagged by Stage 5
+  # Whisper/subtitle fallback: when Pyannote speech_ratio is below this
+  # threshold (common for ASMR/whispering), use subtitle timestamps instead.
+  use_subtitle_segments_fallback: true
+  vad_fallback_threshold: 0.3     # use subtitle path when speech_ratio < 30%
 
 synthesis:
   snr_levels_db: [-10] # [-20, -15, -10, -7, -5, -3, 0, 5, 10, 15, 20, 25]
