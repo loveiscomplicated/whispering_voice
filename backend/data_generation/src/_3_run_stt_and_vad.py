@@ -72,7 +72,34 @@ def _load_whisper(model_name: str = "base", device: str = "cpu") -> Any:
     return model
 
 
-def _load_pyannote(model_name: str = "pyannote/segmentation") -> Any:
+def _fix_at_notation(obj: Any) -> Any:
+    """Recursively replace ``"repo@revision"`` strings with a dict form.
+
+    pyannote 4.x / huggingface_hub 1.x reject ``@`` inside repo IDs.
+    Older Hub configs (e.g. ``pyannote/voice-activity-detection``) still use
+    ``pyannote/segmentation@Interspeech2021`` notation inside ``config.yaml``.
+
+    This helper converts every such bare string to
+    ``{"checkpoint": repo, "revision": rev}`` which
+    ``pyannote.audio.pipelines.utils.getter.get_model`` accepts as-is and
+    forwards to ``Model.from_pretrained(checkpoint=..., revision=...)``.
+
+    ``$model/…`` template strings are intentionally left untouched because
+    ``expand_subfolders`` already handles them correctly.
+    """
+    if isinstance(obj, dict):
+        return {k: _fix_at_notation(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_fix_at_notation(v) for v in obj]
+    if isinstance(obj, str) and "@" in obj and not obj.startswith("$model"):
+        repo, rev = obj.rsplit("@", 1)
+        return {"checkpoint": repo, "revision": rev}
+    return obj
+
+
+def _load_pyannote(
+    model_name: str = "pyannote/voice-activity-detection", device: str = "cpu"
+) -> Any:
     """Load a Pyannote audio pipeline, downloading it on the first call.
 
     Requires a valid Hugging Face token exported as ``HF_TOKEN`` or passed
@@ -80,6 +107,7 @@ def _load_pyannote(model_name: str = "pyannote/segmentation") -> Any:
 
     Args:
         model_name: Pyannote pipeline identifier on the Hub.
+        device: Torch device string (``"cuda"``, ``"mps"``, or ``"cpu"``).
 
     Returns:
         Loaded Pyannote ``Pipeline`` object.
@@ -88,23 +116,48 @@ def _load_pyannote(model_name: str = "pyannote/segmentation") -> Any:
         ImportError: If ``pyannote.audio`` is not installed.
         RuntimeError: If the HF token is missing.
     """
+    import os  # noqa: PLC0415
+
+    import torch  # noqa: PLC0415
+    import torchaudio  # noqa: PLC0415
+    import yaml  # noqa: PLC0415
+
+    # torchaudio 2.x removed list_audio_backends; patch before importing pyannote.
+    if not hasattr(torchaudio, "list_audio_backends"):
+        setattr(torchaudio, "list_audio_backends", lambda: [])
+
     try:
+        from huggingface_hub import hf_hub_download  # noqa: PLC0415
         from pyannote.audio import Pipeline  # noqa: PLC0415
     except ImportError as exc:
         raise ImportError(
-            "pyannote.audio is required. " "Install it with: pip install pyannote.audio"
+            "pyannote.audio and huggingface_hub are required. "
+            "Install with: pip install pyannote.audio huggingface_hub"
         ) from exc
-
-    import os  # noqa: PLC0415
 
     hf_token = os.getenv("HF_TOKEN")
     if not hf_token:
         raise RuntimeError(
-            "Hugging Face token not found. " "Set the HF_TOKEN environment variable."
+            "Hugging Face token not found. Set the HF_TOKEN environment variable."
         )
 
-    logger.info(f"Loading Pyannote pipeline '{model_name}' …")
-    pipeline = Pipeline.from_pretrained(model_name, use_auth_token=hf_token)
+    logger.info(f"Loading Pyannote pipeline '{model_name}' on {device} …")
+
+    # pyannote/voice-activity-detection's config.yaml still uses the old
+    # "repo@revision" notation (e.g. "pyannote/segmentation@Interspeech2021").
+    # pyannote 4.x + huggingface_hub 1.x raise ValueError on "@" in repo IDs.
+    # Fix: download the config, transform all "@" strings, then pass the
+    # patched config dict directly to Pipeline.from_pretrained.
+    config_path = hf_hub_download(model_name, "config.yaml", token=hf_token)
+    with open(config_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    config = _fix_at_notation(config)
+    pipeline = Pipeline.from_pretrained(config, token=hf_token)
+
+    if pipeline is not None:
+        pipeline.to(torch.device(device))
+
     logger.info("Pyannote pipeline loaded.")
     return pipeline
 
@@ -125,7 +178,12 @@ def _resolve_device(preferred: str = "cuda") -> str:
     try:
         import torch  # noqa: PLC0415
 
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.mps.is_available():
+            return "mps"
+        else:
+            return "cpu"
     except ImportError:
         return "cpu"
 
@@ -160,7 +218,9 @@ class STTAndVADProcessor:
         self._min_confidence: float = stt_cfg.get("min_confidence", 0.85)
         self._device: str = _resolve_device(stt_cfg.get("device", "cuda"))
 
-        self._vad_model_name: str = vad_cfg.get("model", "pyannote/segmentation")
+        self._vad_model_name: str = vad_cfg.get(
+            "model", "pyannote/voice-activity-detection"
+        )
         self._vad_threshold: float = vad_cfg.get("threshold", 0.5)
         self._min_speech_ms: float = vad_cfg.get("min_speech_duration_ms", 300)
 
@@ -181,7 +241,7 @@ class STTAndVADProcessor:
     @property
     def _pyannote(self) -> Any:
         if self._vad_pipeline is None:
-            self._vad_pipeline = _load_pyannote(self._vad_model_name)
+            self._vad_pipeline = _load_pyannote(self._vad_model_name, self._device)
         return self._vad_pipeline
 
     # ------------------------------------------------------------------
@@ -231,6 +291,17 @@ class STTAndVADProcessor:
         else:
             confidence = 0.0
 
+        # Store per-segment timestamps so Stage 6 (segmentation) can align
+        # transcript text to individual VAD segments without re-running Whisper.
+        whisper_segments = [
+            {
+                "start_ms": round(s.get("start", 0.0) * 1_000, 2),
+                "end_ms": round(s.get("end", 0.0) * 1_000, 2),
+                "text": s.get("text", "").strip(),
+            }
+            for s in segments
+        ]
+
         return {
             "transcript": result.get("text", "").strip(),
             "confidence": round(confidence, 4),
@@ -238,6 +309,7 @@ class STTAndVADProcessor:
             "model_used": f"whisper-{self._stt_model_name}",
             "model_version": _WHISPER_MODEL_VERSION,
             "processing_time_ms": elapsed_ms,
+            "whisper_segments": whisper_segments,
         }
 
     def run_vad(self, audio_path: str) -> dict[str, Any]:
@@ -268,7 +340,10 @@ class STTAndVADProcessor:
             ) from exc
 
         try:
-            diarization = self._pyannote(audio_path)
+            import torch  # noqa: PLC0415
+
+            waveform = torch.tensor(audio).unsqueeze(0)  # [1, samples]
+            diarization = self._pyannote({"waveform": waveform, "sample_rate": sr})
         except Exception as exc:
             raise RuntimeError(
                 f"Pyannote VAD failed for '{audio_path}': {exc}"
@@ -360,6 +435,7 @@ class STTAndVADProcessor:
                 "confidence_score": stt_result["confidence"],
                 "model_used": stt_result["model_used"],
                 "model_version": stt_result["model_version"],
+                "whisper_segments": stt_result.get("whisper_segments", []),
             },
             "vad_result": enriched_vad,
             "audio_characteristics": {

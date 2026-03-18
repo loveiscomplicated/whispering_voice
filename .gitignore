@@ -88,3 +88,5 @@ backend/data_generation/passed_files
 backend/data_generation/preprocessed
 backend/data_generation/synthesized
 backend/data_generation/stt_and_vad
+.claude
+backend/data_generation/segments

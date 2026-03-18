@@ -28,7 +28,7 @@ preprocessing:
 
 quality_validation_strict:
   min_audio_length_ms: 1000
-  max_audio_length_ms: 30000
+  max_audio_length_ms: 3600000  # 1 hour — long files are split by Stage 6
   min_energy_db: -40
   max_energy_db: -10
   require_sample_rate: 16000
@@ -40,12 +40,18 @@ stt:
   device: "mps"
 
 vad:
-  model: "pyannote/segmentation"
+  model: "pyannote/voice-activity-detection"
   threshold: 0.5
   min_speech_duration_ms: 300
 
+segmentation:
+  min_segment_duration_ms: 500    # discard VAD segments shorter than this
+  max_segment_duration_ms: 30000  # discard VAD segments longer than this
+  padding_ms: 50                  # silence padding added to each side
+  skip_low_confidence: false      # set true to skip files flagged by Stage 5
+
 synthesis:
-  snr_levels_db: [5, 10, 15, 20, 25]
+  snr_levels_db: [-20, -15, -10, -7, -5, -3, 0, 5, 10, 15, 20, 25]
   noise_types: ["ambient", "traffic", "office"]
   noise_distribution:
     ambient: 0.4
@@ -60,6 +66,7 @@ output_dirs:
   final_files: "./backend/data_generation/final_files"
   validation_failed: "./backend/data_generation/validation_failed"
   stt_and_vad: "./backend/data_generation/stt_and_vad"
+  segments: "./backend/data_generation/segments"
   synthesized: "./backend/data_generation/synthesized"
   dataset: "./backend/data_generation/dataset"
   logs: "../backend/data_generation/logs"

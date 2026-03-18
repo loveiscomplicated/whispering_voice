@@ -4,7 +4,9 @@ Converts raw downloaded audio files into a consistent format suitable for
 strict quality validation and STT/VAD processing:
 
 - Resamples to the target sample rate (default 16 kHz).
-- Adjusts length: repeats short clips, center-crops long clips.
+- Pads short clips by repeating them to reach ``min_ms``.
+- Long clips are kept at their full length (no cropping); VAD-based
+  segmentation in Stage 6 divides them into learnable chunks.
 - RMS-normalises to a target loudness level.
 - Applies headroom limiting to avoid clipping.
 
@@ -91,8 +93,10 @@ class AudioPreprocessor:
         2. Adjust length:
            - Shorter than ``min_ms``: repeat via ``np.tile`` until long enough,
              then trim to exactly ``min_ms`` samples.
-           - Between ``min_ms`` and ``max_ms``: pass through.
-           - Longer than ``max_ms``: take the center ``max_ms`` samples.
+           - ``min_ms`` or longer: pass through at full length.  A warning is
+             logged when the file exceeds ``max_ms`` so unusually long files
+             are visible in logs, but they are never cropped here.  Stage 6
+             (segmentation) divides long files into per-VAD-segment clips.
         3. RMS-normalise to ``target_db`` dBFS.
         4. Apply headroom limit so that ``max|audio| ≤ 10^(-headroom_db/20)``.
 
@@ -194,7 +198,15 @@ class AudioPreprocessor:
     # ------------------------------------------------------------------
 
     def _adjust_length(self, audio: np.ndarray) -> np.ndarray:
-        """Adjust audio length to lie within [min_ms, max_ms].
+        """Ensure audio is at least ``min_ms`` long; pass longer clips as-is.
+
+        Short clips are padded by repeating (``np.tile``) and trimmed to
+        exactly ``min_ms`` samples.  Clips that meet or exceed ``min_ms``
+        are returned at their original length — long files are intentionally
+        never cropped so that Stage 6 can extract all VAD-detected speech.
+
+        A debug-level log entry is emitted when the clip exceeds ``max_ms``
+        to keep unusually long files visible without discarding them.
 
         Args:
             audio: Input 1-D float32 audio array at ``target_sample_rate``.
@@ -207,13 +219,15 @@ class AudioPreprocessor:
         n = len(audio)
 
         if n < min_samples:
-            # Repeat until long enough, then trim
+            # Pad: repeat until long enough, then trim to exactly min_ms
             repeats = int(np.ceil(min_samples / max(n, 1)))
             audio = np.tile(audio, repeats)[:min_samples]
         elif n > max_samples:
-            # Center-crop
-            start = (n - max_samples) // 2
-            audio = audio[start : start + max_samples]
+            duration_s = n / self._target_sr
+            self._logger.debug(
+                f"Audio is {duration_s:.1f}s (> max {self._max_ms/1000:.0f}s); "
+                "keeping full length for VAD-based segmentation in Stage 6."
+            )
 
         return audio
 

@@ -40,7 +40,7 @@ from src.utils.logger import setup_logger  # noqa: E402
 # ML libraries (whisper, pyannote) until they are actually needed.
 
 _CHECKPOINT_FILENAME = "pipeline_checkpoint.json"
-_TOTAL_STAGES = 7
+_TOTAL_STAGES = 8
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +101,10 @@ class DataGenerationPipeline:
         self._stt_vad_dir: str = out_dirs.get(
             "stt_and_vad",
             "./backend/data_generation/stt_and_vad",
+        )
+        self._segments_dir: str = out_dirs.get(
+            "segments",
+            "./backend/data_generation/segments",
         )
         self._synth_dir: str = out_dirs.get(
             "synthesized",
@@ -274,12 +278,13 @@ class DataGenerationPipeline:
         # fmt: off
         return [
             {"number": 1, "name": "YouTube Download",          "runner": self._run_stage_1},
-            {"number": 2, "name": "Quality Validation Basic",  "runner": self._run_stage_2,},
+            {"number": 2, "name": "Quality Validation Basic",  "runner": self._run_stage_2},
             {"number": 3, "name": "Preprocessing",             "runner": self._run_stage_3},
-            {"number": 4, "name": "Quality Validation Strict", "runner": self._run_stage_4,},
+            {"number": 4, "name": "Quality Validation Strict", "runner": self._run_stage_4},
             {"number": 5, "name": "STT + VAD Processing",      "runner": self._run_stage_5},
-            {"number": 6, "name": "Noise Synthesis",           "runner": self._run_stage_6},
-            {"number": 7, "name": "Dataset Generation",        "runner": self._run_stage_7},
+            {"number": 6, "name": "Audio Segmentation",        "runner": self._run_stage_6},
+            {"number": 7, "name": "Noise Synthesis",           "runner": self._run_stage_7},
+            {"number": 8, "name": "Dataset Generation",        "runner": self._run_stage_8},
         ]
 
     # Stage runners ---------------------------------------------------
@@ -403,28 +408,48 @@ class DataGenerationPipeline:
         }
 
     def _run_stage_6(self) -> dict[str, Any]:
-        from src._4_synthesize_noise import (
-            NoiseSynthesizer,
-        )  # noqa: PLC0415
+        from src._5_segment_audio import AudioSegmentor  # noqa: PLC0415
+
+        segmentor = AudioSegmentor(config=self._config, logger=self._log)
+        segments = segmentor.process_batch(self._stt_vad_dir, self._segments_dir)
+        segmentor.save_manifest(segments, self._segments_dir)
+
+        total_ms = sum(
+            s.get("audio_characteristics", {}).get("duration_ms", 0.0)
+            for s in segments
+        )
+        return {
+            "total_segments": len(segments),
+            "total_speech_ms": round(total_ms, 2),
+            "output_dir": self._segments_dir,
+        }
+
+    def _run_stage_7(self) -> dict[str, Any]:
+        from src._4_synthesize_noise import NoiseSynthesizer  # noqa: PLC0415
 
         synthesizer = NoiseSynthesizer(config=self._config, logger=self._log)
         noise_dir = str(Path(self._raw_dir) / "noise")
+        # Feed the segmented clips (segments/audio/) into noise synthesis so
+        # every short clip gets its own noise-augmented variants.
+        segments_audio_dir = str(Path(self._segments_dir) / "audio")
         results = synthesizer.synthesize_batch(
-            asmr_dir=self._stt_vad_dir,
+            asmr_dir=segments_audio_dir,
             noise_dir=noise_dir,
             output_dir=self._synth_dir,
         )
         total = sum(len(v) for v in results.values())
         return {"synthesized_files": total, "output_dir": self._synth_dir}
 
-    def _run_stage_7(self) -> dict[str, Any]:
+    def _run_stage_8(self) -> dict[str, Any]:
         from src._6_generate_finetuning_dataset import (
             FinetuningDatasetGenerator,
         )  # noqa: PLC0415
 
         generator = FinetuningDatasetGenerator(config=self._config, logger=self._log)
+        # Point dataset generation at segments/ so it reads per-segment
+        # metadata and finds audio at segments/audio/.
         manifest = generator.create_dataset(
-            stt_and_vad_dir=self._stt_vad_dir,
+            stt_and_vad_dir=self._segments_dir,
             synthesized_dir=self._synth_dir,
             output_dir=self._dataset_dir,
         )
