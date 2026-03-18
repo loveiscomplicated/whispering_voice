@@ -291,16 +291,29 @@ class AudioSegmentor:
         Returns:
             Flat list of all per-segment metadata dictionaries produced.
         """
+        # Always create output directories so downstream stages (noise
+        # synthesis, dataset generation) can safely reference them even
+        # when 0 segments are produced.
+        audio_out = Path(output_dir) / "audio"
+        meta_out_dir = Path(output_dir) / "metadata"
+        audio_out.mkdir(parents=True, exist_ok=True)
+        meta_out_dir.mkdir(parents=True, exist_ok=True)
+
         meta_dir = Path(stt_vad_dir) / "metadata"
         if not meta_dir.is_dir():
             raise NotADirectoryError(
-                f"Stage 5 metadata directory not found: {meta_dir}"
+                f"Stage 5 metadata directory not found: {meta_dir}. "
+                "Ensure Stage 5 (STT + VAD) has been run and completed successfully."
             )
 
         meta_files = sorted(meta_dir.glob("*_metadata.json"))
         if not meta_files:
-            self._logger.warning(f"No metadata files found in: {meta_dir}")
-            return []
+            raise RuntimeError(
+                f"No metadata files found in: {meta_dir}. "
+                "Stage 5 (STT + VAD) completed but wrote no metadata — "
+                "check that at least one audio file passed Stage 4 validation "
+                "and that STT/VAD processing did not fail for all files."
+            )
 
         self._logger.info(
             f"Segmenting {len(meta_files)} file(s) from: {stt_vad_dir}"

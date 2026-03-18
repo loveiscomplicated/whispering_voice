@@ -413,6 +413,20 @@ class DataGenerationPipeline:
             except Exception as exc:
                 self._log.error(f"Stage 5 failed for {af.name}: {exc}")
 
+        if not results:
+            if not audio_files:
+                raise RuntimeError(
+                    "Stage 5 found no audio files to process. "
+                    "Ensure Stage 4 (Quality Validation Strict) passed at least one file. "
+                    f"Expected WAV files in: {self._final_files_dir}"
+                )
+            raise RuntimeError(
+                f"Stage 5 failed to process all {len(audio_files)} audio file(s). "
+                "See the error log entries above for details on why each file failed. "
+                "Common causes: Whisper model unavailable, VAD pipeline error, "
+                "or audio files corrupted."
+            )
+
         return {
             "processed": len(results),
             "metadata_dir": str(metadata_dir),
@@ -438,13 +452,28 @@ class DataGenerationPipeline:
     def _run_stage_7(self) -> dict[str, Any]:
         from src._4_synthesize_noise import NoiseSynthesizer  # noqa: PLC0415
 
-        synthesizer = NoiseSynthesizer(config=self._config, logger=self._log)
-        noise_dir = str(Path(self._raw_dir) / "noise")
         # Feed the segmented clips (segments/audio/) into noise synthesis so
         # every short clip gets its own noise-augmented variants.
-        segments_audio_dir = str(Path(self._segments_dir) / "audio")
+        segments_audio_dir = Path(self._segments_dir) / "audio"
+        if not segments_audio_dir.exists():
+            raise FileNotFoundError(
+                f"Segments audio directory not found: {segments_audio_dir}. "
+                "Ensure Stage 6 (Audio Segmentation) completed successfully "
+                "and produced at least one segment."
+            )
+
+        wav_files = sorted(segments_audio_dir.glob("*.wav"))
+        if not wav_files:
+            raise RuntimeError(
+                f"No WAV files found in {segments_audio_dir}. "
+                "Stage 6 produced an empty segments directory. "
+                "Check Stage 5 (STT+VAD) output to ensure metadata was written."
+            )
+
+        synthesizer = NoiseSynthesizer(config=self._config, logger=self._log)
+        noise_dir = str(Path(self._raw_dir) / "noise")
         results = synthesizer.synthesize_batch(
-            asmr_dir=segments_audio_dir,
+            asmr_dir=str(segments_audio_dir),
             noise_dir=noise_dir,
             output_dir=self._synth_dir,
         )
