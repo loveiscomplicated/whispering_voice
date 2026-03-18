@@ -317,7 +317,7 @@ class QualityValidatorStrict:
         audio: np.ndarray | None = None
         sr: int | None = None
         try:
-            audio, sr = load_audio(audio_path, sr=None)
+            audio, sr = load_audio(audio_path, sr=None)  # type: ignore
             result.file_intact = True
         except FileNotFoundError:
             reasons.append("file not found")
