@@ -1,6 +1,6 @@
 youtube:
   playlist_ids:
-    - "PL6YVF-LNNIQb_yCmKUkM-tShu-Z-DCapZ"
+    - "PL6YVF-LNNIQaVyUUBytz5F1GJGuxC3zNg"
   max_videos_per_playlist: 1 # 1 for debug
 
 quality_validation:
@@ -29,7 +29,7 @@ preprocessing:
 quality_validation_strict:
   min_audio_length_ms: 1000
   max_audio_length_ms: 3600000  # 1 hour — long files are split by Stage 6
-  min_energy_db: -40
+  min_energy_db: -50
   max_energy_db: -10
   require_sample_rate: 16000
 
@@ -44,6 +44,14 @@ vad:
   threshold: 0.5
   min_speech_duration_ms: 300
 
+subtitle:
+  enabled: false              # set true to try YouTube subtitles before Whisper
+  language: "ko"              # BCP-47 language code passed to yt-dlp --sub-langs
+  prefer_manual: true         # try creator/community subtitles first
+  allow_auto_generated: true  # fall back to auto-generated captions
+  fallback_to_stt: true       # use Whisper when no subtitles are found
+  cache_dir: "./backend/data_generation/subtitles"
+
 segmentation:
   min_segment_duration_ms: 500    # discard VAD segments shorter than this
   max_segment_duration_ms: 30000  # discard VAD segments longer than this
@@ -51,7 +59,7 @@ segmentation:
   skip_low_confidence: false      # set true to skip files flagged by Stage 5
 
 synthesis:
-  snr_levels_db: [-20, -15, -10, -7, -5, -3, 0, 5, 10, 15, 20, 25]
+  snr_levels_db: [-10] # [-20, -15, -10, -7, -5, -3, 0, 5, 10, 15, 20, 25]
   noise_types: ["ambient", "traffic", "office"]
   noise_distribution:
     ambient: 0.4
