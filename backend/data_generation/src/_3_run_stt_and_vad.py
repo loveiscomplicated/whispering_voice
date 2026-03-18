@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
-
+from dotenv import load_dotenv
 import numpy as np
 
 _HERE = Path(__file__).resolve().parent
@@ -39,6 +39,7 @@ logger = setup_logger(__name__)
 _PIPELINE_VERSION = "1.0"
 _WHISPER_MODEL_VERSION = "v20230314"
 _SUPPORTED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+load_dotenv()
 
 
 # ---------------------------------------------------------------------------
