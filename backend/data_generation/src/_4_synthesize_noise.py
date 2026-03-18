@@ -111,7 +111,11 @@ def _truncate_to_length(audio: np.ndarray, target_length: int) -> np.ndarray:
     Returns:
         Array of exactly *target_length* samples.
     """
-    return audio[:target_length]
+    import random
+
+    end_tail = len(audio) - target_length
+    start = random.randint(0, end_tail)
+    return audio[start : start + end_tail]
 
 
 # ---------------------------------------------------------------------------
@@ -179,13 +183,15 @@ class NoiseSynthesizer:
         noise, _ = load_audio(noise_path, sr=_SAMPLE_RATE)
 
         # Match lengths by looping the shorter array
+        """
         target_len = max(len(signal), len(noise))
         signal = _loop_to_length(signal, target_len)
         noise = _loop_to_length(noise, target_len)
+        """
 
         target_len = len(signal)
         if len(noise) >= target_len:
-            signal = _truncate_to_length(signal, target_len)
+            noise = _truncate_to_length(noise, target_len)
         else:
             noise = _loop_to_length(noise, target_len)
 

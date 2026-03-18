@@ -361,11 +361,22 @@ class DataGenerationPipeline:
         }
 
     def _run_stage_5(self) -> dict[str, Any]:
-        from src._3_run_stt_and_vad import (
-            STTAndVADProcessor,
-        )  # noqa: PLC0415
+        from src._3_run_stt_and_vad import STTAndVADProcessor  # noqa: PLC0415
 
-        processor = STTAndVADProcessor(config=self._config, logger=self._log)
+        subtitle_fetcher = None
+        if self._config.get("subtitle", {}).get("enabled", False):
+            from src._subtitle_fetcher import YouTubeSubtitleFetcher  # noqa: PLC0415
+
+            subtitle_fetcher = YouTubeSubtitleFetcher(
+                config=self._config, logger=self._log
+            )
+            self._log.info("YouTube subtitle fetcher enabled")
+
+        processor = STTAndVADProcessor(
+            config=self._config,
+            logger=self._log,
+            subtitle_fetcher=subtitle_fetcher,
+        )
 
         # Prefer the list of files that passed Stage 4 strict validation
         passed_json = str(

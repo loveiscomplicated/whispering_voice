@@ -202,11 +202,21 @@ class STTAndVADProcessor:
     Args:
         config: Pipeline configuration dictionary (from ``load_config``).
         logger: Logger instance for this processor.
+        subtitle_fetcher: Optional :class:`YouTubeSubtitleFetcher`.  When
+            provided, subtitles are tried before Whisper for every file.
+            Whisper is used as a fallback when subtitles are unavailable
+            (or when ``subtitle.fallback_to_stt`` is ``true`` in config).
     """
 
-    def __init__(self, config: dict[str, Any], logger: Any) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        logger: Any,
+        subtitle_fetcher: Any = None,
+    ) -> None:
         self._config = config
         self._logger = logger
+        self._subtitle_fetcher = subtitle_fetcher
 
         stt_cfg = config.get("stt", {})
         vad_cfg = config.get("vad", {})
@@ -467,7 +477,20 @@ class STTAndVADProcessor:
         stem = Path(audio_path).stem
         self._logger.info(f"Processing: {stem}")
 
-        stt = self.run_stt(audio_path)
+        # Prefer YouTube subtitles when a fetcher is configured.
+        # Fall back to Whisper if subtitles are unavailable.
+        stt: dict[str, Any] | None = None
+        if self._subtitle_fetcher is not None:
+            stt = self._subtitle_fetcher.fetch(stem)
+            if stt is not None:
+                self._logger.info(
+                    f"Using subtitles for {stem} "
+                    f"(model={stt.get('model_version', '?')})"
+                )
+
+        if stt is None:
+            stt = self.run_stt(audio_path)
+
         vad = self.run_vad(audio_path)
         metadata = self.generate_metadata(stem, stt, vad, audio_path)
 
