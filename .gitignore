@@ -90,3 +90,4 @@ backend/data_generation/synthesized
 backend/data_generation/stt_and_vad
 .claude
 backend/data_generation/segments
+backend/data_generation/subtitles
