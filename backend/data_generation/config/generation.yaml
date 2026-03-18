@@ -45,7 +45,7 @@ vad:
   min_speech_duration_ms: 300
 
 subtitle:
-  enabled: false              # set true to try YouTube subtitles before Whisper
+  enabled: true              # set true to try YouTube subtitles before Whisper
   language: "ko"              # BCP-47 language code passed to yt-dlp --sub-langs
   prefer_manual: true         # try creator/community subtitles first
   allow_auto_generated: true  # fall back to auto-generated captions
