@@ -255,6 +255,37 @@ class NoiseSynthesizer:
             self._logger.warning(f"No audio files found in: {asmr_dir}")
             return {}
 
+        # Build audio_id → transcript lookup from segment metadata JSONs.
+        # Segment metadata lives one level up from the audio directory, e.g.
+        # segments/audio/ → segments/metadata/{audio_id}_metadata.json
+        transcript_lookup: dict[str, str] = {}
+        segments_meta_dir = Path(asmr_dir).parent / "metadata"
+        if segments_meta_dir.is_dir():
+            for meta_file in segments_meta_dir.glob("*_metadata.json"):
+                try:
+                    with open(meta_file, encoding="utf-8") as f:
+                        seg_meta = json.load(f)
+                    aid = seg_meta.get(
+                        "audio_id",
+                        meta_file.stem.replace("_metadata", ""),
+                    )
+                    transcript = seg_meta.get("stt_result", {}).get("transcript", "")
+                    if transcript:
+                        transcript_lookup[aid] = transcript
+                except Exception as exc:
+                    self._logger.warning(
+                        f"Could not read segment metadata {meta_file.name}: {exc}"
+                    )
+            self._logger.info(
+                f"Loaded transcripts for {len(transcript_lookup)} segment(s) "
+                f"from {segments_meta_dir}"
+            )
+        else:
+            self._logger.warning(
+                f"Segment metadata directory not found: {segments_meta_dir}. "
+                "Synthesized metadata will not include transcripts."
+            )
+
         # Collect noise files per type
         noise_files: dict[str, list[Path]] = {}
         for noise_type in self._noise_types:
@@ -315,6 +346,7 @@ class NoiseSynthesizer:
                                 noise_type=noise_type,
                                 snr_db=snr,
                                 mixed=mixed,
+                                transcript=transcript_lookup.get(audio_id, ""),
                             )
                             results.setdefault(label, []).append(str(out_path))
                         except Exception as exc:
@@ -364,6 +396,7 @@ class NoiseSynthesizer:
         noise_type: str,
         snr_db: float,
         mixed: np.ndarray,
+        transcript: str = "",
     ) -> None:
         """Write a JSON sidecar next to a synthesized WAV file.
 
@@ -374,6 +407,7 @@ class NoiseSynthesizer:
             noise_type: Noise category label.
             snr_db: Target SNR in dB used for synthesis.
             mixed: The synthesized audio array (for computing stats).
+            transcript: Transcript text from STT / subtitles for this segment.
         """
         rms = _rms(mixed)
         rms_db = float(20.0 * np.log10(rms + 1e-9))
@@ -382,6 +416,7 @@ class NoiseSynthesizer:
 
         meta = {
             "audio_id": audio_id,
+            "transcript": transcript,
             "source_asmr": str(wav_path.parent / f"{audio_id}.wav"),
             "source_noise": noise_path,
             "noise_type": noise_type,

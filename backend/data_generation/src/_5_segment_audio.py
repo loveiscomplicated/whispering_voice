@@ -116,10 +116,137 @@ class AudioSegmentor:
         self._logger = logger
 
         seg_cfg = config.get("segmentation", {})
-        self._min_duration_ms: float = seg_cfg.get("min_segment_duration_ms", 500.0)
-        self._max_duration_ms: float = seg_cfg.get("max_segment_duration_ms", 30_000.0)
+        self._min_duration_ms: float = seg_cfg.get("min_segment_duration_ms", 5_000.0)
+        self._max_duration_ms: float = seg_cfg.get("max_segment_duration_ms", 20_000.0)
+        self._merge_max_gap_ms: float = seg_cfg.get("merge_max_gap_ms", 1_000.0)
         self._padding_ms: float = seg_cfg.get("padding_ms", 50.0)
         self._skip_low_confidence: bool = seg_cfg.get("skip_low_confidence", False)
+        # When Pyannote speech_ratio falls below this threshold (e.g. whispering
+        # content), use subtitle/Whisper timestamps for slicing instead.
+        self._use_subtitle_fallback: bool = seg_cfg.get(
+            "use_subtitle_segments_fallback", True
+        )
+        self._vad_fallback_threshold: float = seg_cfg.get(
+            "vad_fallback_threshold", 0.3
+        )
+
+    # ------------------------------------------------------------------
+    # VAD segment merging
+    # ------------------------------------------------------------------
+
+    def _collapse_group(self, group: list[dict[str, Any]]) -> dict[str, Any]:
+        """Collapse a list of consecutive VAD segments into one merged segment.
+
+        The merged segment spans from ``group[0]["start_ms"]`` to
+        ``group[-1]["end_ms"]``.  Confidence is the minimum across the group
+        (conservative estimate).
+
+        Args:
+            group: Non-empty list of VAD segment dicts.
+
+        Returns:
+            A single merged VAD segment dict.
+        """
+        return {
+            "segment_id": group[0]["segment_id"],
+            "start_ms": group[0]["start_ms"],
+            "end_ms": group[-1]["end_ms"],
+            "duration_ms": round(group[-1]["end_ms"] - group[0]["start_ms"], 2),
+            "confidence": round(min(s["confidence"] for s in group), 4),
+        }
+
+    def _merge_vad_segments(
+        self, vad_segments: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Merge short consecutive VAD segments into longer clips.
+
+        Adjacent segments are merged when:
+
+        1. The silence gap between them is at most ``merge_max_gap_ms``, **and**
+        2. The resulting merged duration would not exceed ``max_segment_duration_ms``.
+
+        When either condition is violated the current group is finalised and a
+        new group begins with the next segment.
+
+        Args:
+            vad_segments: Raw VAD segments from Pyannote (ordered by start time).
+
+        Returns:
+            List of merged segment dicts ready for slicing.
+        """
+        if not vad_segments:
+            return []
+
+        merged: list[dict[str, Any]] = []
+        group: list[dict[str, Any]] = [vad_segments[0]]
+
+        for seg in vad_segments[1:]:
+            last = group[-1]
+            gap_ms = seg["start_ms"] - last["end_ms"]
+            new_duration_ms = seg["end_ms"] - group[0]["start_ms"]
+
+            if gap_ms <= self._merge_max_gap_ms and new_duration_ms <= self._max_duration_ms:
+                group.append(seg)
+            else:
+                merged.append(self._collapse_group(group))
+                group = [seg]
+
+        merged.append(self._collapse_group(group))
+        return merged
+
+    def _merge_whisper_segments(
+        self, whisper_segments: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Merge subtitle/Whisper segments into longer sliceable chunks.
+
+        Used as a fallback when Pyannote VAD speech ratio is too low to be
+        reliable (e.g. whispering/ASMR content).  Unlike VAD merging, each
+        input segment already carries its transcript text, so the merged
+        output includes a ``text`` field with the concatenated lines.
+
+        Args:
+            whisper_segments: List of ``{"start_ms", "end_ms", "text"}`` dicts
+                from ``stt_result.whisper_segments``.
+
+        Returns:
+            List of merged chunk dicts with keys ``start_ms``, ``end_ms``,
+            ``duration_ms``, and ``text``.
+        """
+        segs = [s for s in whisper_segments if s.get("text", "").strip()]
+        if not segs:
+            return []
+
+        merged: list[dict[str, Any]] = []
+        group = [segs[0]]
+        group_texts: list[str] = [segs[0]["text"].strip()]
+
+        for seg in segs[1:]:
+            last = group[-1]
+            gap_ms = seg["start_ms"] - last["end_ms"]
+            new_duration_ms = seg["end_ms"] - group[0]["start_ms"]
+
+            if gap_ms <= self._merge_max_gap_ms and new_duration_ms <= self._max_duration_ms:
+                group.append(seg)
+                text = seg.get("text", "").strip()
+                if text:
+                    group_texts.append(text)
+            else:
+                merged.append({
+                    "start_ms": group[0]["start_ms"],
+                    "end_ms": group[-1]["end_ms"],
+                    "duration_ms": round(group[-1]["end_ms"] - group[0]["start_ms"], 2),
+                    "text": " ".join(group_texts).strip(),
+                })
+                group = [seg]
+                group_texts = [seg.get("text", "").strip()]
+
+        merged.append({
+            "start_ms": group[0]["start_ms"],
+            "end_ms": group[-1]["end_ms"],
+            "duration_ms": round(group[-1]["end_ms"] - group[0]["start_ms"], 2),
+            "text": " ".join(group_texts).strip(),
+        })
+        return merged
 
     # ------------------------------------------------------------------
     # Public API
@@ -159,12 +286,64 @@ class AudioSegmentor:
         full_transcript: str = stt.get("transcript", "")
         whisper_segments: list[dict[str, Any]] = stt.get("whisper_segments", [])
 
-        vad_segments: list[dict[str, Any]] = (
-            meta.get("vad_result", {}).get("segments", [])
+        vad_result = meta.get("vad_result", {})
+        raw_vad_segments: list[dict[str, Any]] = vad_result.get("segments", [])
+        vad_speech_ratio: float = vad_result.get("speech_ratio", 1.0)
+
+        # ------------------------------------------------------------------
+        # Decide which source to use for slicing boundaries.
+        #
+        # Pyannote VAD is trained on normal-volume speech.  For ASMR /
+        # whispering content its speech_ratio is often < 10% even when the
+        # speaker never stops talking.  When this happens, fall back to the
+        # subtitle / Whisper timestamps which were produced independently and
+        # are accurate regardless of energy level.
+        # ------------------------------------------------------------------
+        use_subtitle = (
+            self._use_subtitle_fallback
+            and vad_speech_ratio < self._vad_fallback_threshold
+            and bool(whisper_segments)
         )
-        if not vad_segments:
-            self._logger.warning(f"No VAD segments in metadata for {audio_id}")
-            return []
+
+        if use_subtitle:
+            self._logger.warning(
+                f"  {audio_id}: VAD speech_ratio={vad_speech_ratio:.1%} < "
+                f"threshold={self._vad_fallback_threshold:.0%} — "
+                "falling back to subtitle/Whisper segments for slicing"
+            )
+            # Each element: {start_ms, end_ms, duration_ms, text}
+            sliceable = self._merge_whisper_segments(whisper_segments)
+            segment_source = "subtitle"
+            self._logger.info(
+                f"  {audio_id}: merged {len(whisper_segments)} subtitle segments "
+                f"→ {len(sliceable)} chunks"
+            )
+        else:
+            if not raw_vad_segments:
+                self._logger.warning(f"No VAD segments in metadata for {audio_id}")
+                return []
+            merged_vad = self._merge_vad_segments(raw_vad_segments)
+            self._logger.info(
+                f"  {audio_id}: merged {len(raw_vad_segments)} VAD segments "
+                f"→ {len(merged_vad)} chunks "
+                f"(gap≤{self._merge_max_gap_ms:.0f}ms, max≤{self._max_duration_ms/1000:.0f}s)"
+            )
+            text_assignments = _build_exclusive_alignment(merged_vad, whisper_segments)
+            # Convert to unified format with pre-resolved text
+            sliceable = [
+                {
+                    "start_ms": seg["start_ms"],
+                    "end_ms": seg["end_ms"],
+                    "duration_ms": seg["duration_ms"],
+                    "text": (
+                        " ".join(text_assignments.get(i, [])).strip()
+                        or full_transcript
+                    ),
+                    "_vad_seg": seg,
+                }
+                for i, seg in enumerate(merged_vad)
+            ]
+            segment_source = "vad"
 
         try:
             audio, sr = load_audio(audio_path, sr=_SAMPLE_RATE)
@@ -179,30 +358,24 @@ class AudioSegmentor:
         audio_out.mkdir(parents=True, exist_ok=True)
         meta_out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Pre-compute exclusive alignment over all VAD segments so that each
-        # Whisper segment's text is assigned to exactly one VAD segment (the
-        # one with the greatest time overlap).  This prevents the same
-        # sentence appearing in multiple short consecutive segments.
-        text_assignments = _build_exclusive_alignment(vad_segments, whisper_segments)
-
         results: list[dict[str, Any]] = []
-        seg_counter = 0  # index among segments that actually pass filters
+        seg_counter = 0
 
-        for vad_idx, vad_seg in enumerate(vad_segments):
-            start_ms: float = vad_seg["start_ms"]
-            end_ms: float = vad_seg["end_ms"]
+        for chunk in sliceable:
+            start_ms: float = chunk["start_ms"]
+            end_ms: float = chunk["end_ms"]
             duration_ms: float = end_ms - start_ms
 
             if duration_ms < self._min_duration_ms:
                 self._logger.debug(
-                    f"  Skip {audio_id} seg {vad_seg['segment_id']}: "
+                    f"  Skip {audio_id} chunk @{start_ms:.0f}ms: "
                     f"{duration_ms:.0f}ms < min {self._min_duration_ms:.0f}ms"
                 )
                 continue
 
             if duration_ms > self._max_duration_ms:
                 self._logger.debug(
-                    f"  Skip {audio_id} seg {vad_seg['segment_id']}: "
+                    f"  Skip {audio_id} chunk @{start_ms:.0f}ms: "
                     f"{duration_ms:.0f}ms > max {self._max_duration_ms:.0f}ms"
                 )
                 continue
@@ -220,10 +393,7 @@ class AudioSegmentor:
             if len(segment_audio) == 0:
                 continue
 
-            # Use exclusively assigned text; fall back to full transcript only
-            # when no Whisper segment had its best overlap here.
-            assigned = text_assignments.get(vad_idx, [])
-            text = " ".join(assigned).strip() if assigned else full_transcript
+            text = chunk["text"]
 
             seg_id = f"{audio_id}_seg{seg_counter:03d}"
             seg_wav_path = audio_out / f"{seg_id}.wav"
@@ -231,10 +401,33 @@ class AudioSegmentor:
             save_audio(segment_audio, str(seg_wav_path), sr=sr)
 
             info = get_audio_info(segment_audio, sr)
+
+            # Build vad_segment metadata field — use original VAD info when
+            # available, otherwise synthesise it from the chunk boundaries.
+            vad_seg_ref = chunk.get("_vad_seg")
+            vad_segment_meta: dict[str, Any] = (
+                {
+                    "segment_id": vad_seg_ref["segment_id"],
+                    "start_ms": vad_seg_ref["start_ms"],
+                    "end_ms": vad_seg_ref["end_ms"],
+                    "duration_ms": vad_seg_ref["duration_ms"],
+                    "confidence": vad_seg_ref["confidence"],
+                }
+                if vad_seg_ref is not None
+                else {
+                    "segment_id": seg_counter,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "duration_ms": round(duration_ms, 2),
+                    "confidence": 1.0,
+                }
+            )
+
             seg_meta: dict[str, Any] = {
                 "audio_id": seg_id,
                 "source_audio_id": audio_id,
                 "segment_index": seg_counter,
+                "segment_source": segment_source,
                 "processing_pipeline_version": _PIPELINE_VERSION,
                 "stt_result": {
                     "transcript": text,
@@ -243,13 +436,7 @@ class AudioSegmentor:
                     "model_used": stt.get("model_used"),
                     "model_version": stt.get("model_version"),
                 },
-                "vad_segment": {
-                    "segment_id": vad_seg["segment_id"],
-                    "start_ms": vad_seg["start_ms"],
-                    "end_ms": vad_seg["end_ms"],
-                    "duration_ms": vad_seg["duration_ms"],
-                    "confidence": vad_seg["confidence"],
-                },
+                "vad_segment": vad_segment_meta,
                 "audio_characteristics": {
                     "format": "wav",
                     "sample_rate": sr,

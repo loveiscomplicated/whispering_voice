@@ -440,8 +440,7 @@ class DataGenerationPipeline:
         segmentor.save_manifest(segments, self._segments_dir)
 
         total_ms = sum(
-            s.get("audio_characteristics", {}).get("duration_ms", 0.0)
-            for s in segments
+            s.get("audio_characteristics", {}).get("duration_ms", 0.0) for s in segments
         )
         return {
             "total_segments": len(segments),
