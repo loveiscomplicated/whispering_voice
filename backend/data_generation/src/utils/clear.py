@@ -10,7 +10,7 @@ Usage::
 
     python src/utils/clear.py            # interactive confirmation
     python src/utils/clear.py --yes      # skip confirmation (CI / scripts)
-        python backend/data_generation/src/utils/src/utils/clear.py --yes
+        python backend/data_generation/src/utils/clear.py --yes
     python src/utils/clear.py --stage 3  # clear only Stage 3+ outputs
 """
 
