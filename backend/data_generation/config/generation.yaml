@@ -64,7 +64,7 @@ segmentation:
   vad_fallback_threshold: 0.3     # use subtitle path when speech_ratio < 30%
 
 synthesis:
-  snr_levels_db: [-10] # [-20, -15, -10, -7, -5, -3, 0, 5, 10, 15, 20, 25]
+  snr_levels_db: [-20, -15, -10, -7, -5, -3, 0, 5, 10, 15, 20, 25]  # [-10]
   noise_types: ["ambient", "traffic", "office"]
   noise_distribution:
     ambient: 0.4
