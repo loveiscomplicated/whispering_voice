@@ -3,7 +3,7 @@
 echo "🧪 테스트 실행..."
 
 # 전체 테스트
-pytest backend/tests/ -v --cov=backend/stt_core --cov-report=html
+pytest backend/tests/ # -v --cov=backend/stt_core --cov-report=html
 
 echo ""
 echo "✅ 테스트 완료!"
