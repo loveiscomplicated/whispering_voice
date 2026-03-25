@@ -3,37 +3,79 @@ youtube:
     - "PLxxxxxxxxxxxxxxxx"
   max_videos_per_playlist: 10
 
-quality_validation:
+quality_validation_basic:
+  min_audio_length_ms: 500
+  max_audio_length_ms: 600000000
+  min_energy_db: -80
+  check_readability: true
+
+preprocessing:
+  target_sample_rate: 16000
+  target_rms_db: -20
+  length_adjustment:
+    min_ms: 1000
+    max_ms: 30000
+  normalization:
+    method: "rms"
+    target_db: -20
+    headroom_db: 3
+
+quality_validation_strict:
   min_audio_length_ms: 1000
-  max_audio_length_ms: 30000
-  min_energy_db: -40
+  max_audio_length_ms: 3600000  # 1 hour — long files are split by Stage 6
+  min_energy_db: -50
   max_energy_db: -10
+  require_sample_rate: 16000
 
 stt:
   model: "whisper-base"
   language: "ko"
   min_confidence: 0.85
-  device: "cuda"
+  device: "cuda"  # cuda / mps / cpu
 
 vad:
-  model: "pyannote/segmentation"
+  model: "pyannote/voice-activity-detection"
   threshold: 0.5
   min_speech_duration_ms: 300
 
+subtitle:
+  enabled: true              # set true to try YouTube subtitles before Whisper
+  language: "ko"             # BCP-47 language code passed to yt-dlp --sub-langs
+  prefer_manual: true        # try creator/community subtitles first
+  allow_auto_generated: true # fall back to auto-generated captions
+  fallback_to_stt: true      # use Whisper when no subtitles are found
+  cache_dir: "./backend/data_generation/subtitles"
+
+segmentation:
+  merge_max_gap_ms: 3000         # merge consecutive segments with gaps up to this
+  min_segment_duration_ms: 5000  # discard merged segments shorter than this (5s)
+  max_segment_duration_ms: 20000 # stop merging / discard segments longer than this (20s)
+  padding_ms: 50                 # silence padding added to each side
+  skip_low_confidence: false     # set true to skip files flagged by Stage 5
+  use_subtitle_segments_fallback: true
+  vad_fallback_threshold: 0.3    # use subtitle path when speech_ratio < 30%
+
 synthesis:
-  snr_levels_db: [5, 10, 15, 20, 25]
+  snr_levels_db: [-10, 0, 5, 10]
   noise_types: ["ambient", "traffic", "office"]
-  noise_distribution:
-    ambient: 0.4
-    traffic: 0.3
-    office: 0.3
+  # Noise files longer than long_noise_threshold_s are divided into
+  # noise_crop_count evenly-spaced crops so that the full recording is
+  # represented in the synthesized dataset.
+  noise_crop_count: 10           # number of crops for long noise files
+  long_noise_threshold_s: 60.0   # files longer than this (seconds) are cropped
 
 output_dirs:
   raw_downloads: "./backend/data_generation/raw_downloads"
+  passed_files: "./backend/data_generation/passed_files"
+  rejected_files: "./backend/data_generation/rejected_files"
+  preprocessed: "./backend/data_generation/preprocessed"
+  final_files: "./backend/data_generation/final_files"
+  validation_failed: "./backend/data_generation/validation_failed"
   stt_and_vad: "./backend/data_generation/stt_and_vad"
+  segments: "./backend/data_generation/segments"
   synthesized: "./backend/data_generation/synthesized"
   dataset: "./backend/data_generation/dataset"
-  logs: "./logs"
+  logs: "./backend/data_generation/logs"
 
 reproducibility:
   seed: 42
