@@ -14,6 +14,7 @@ import noisereduce as nr
 def save_result(
     result_df: pd.DataFrame,
     snr: int,
+    noise_type: str,
     denoize_model_name: str,
     ref: str,
     pred: str,
@@ -49,6 +50,7 @@ def save_result(
     """
     row_dict = {
         "snr": snr,
+        "noise_type": noise_type,
         "denoize_model_name": denoize_model_name,
         "ref": ref,
         "pred": pred,
@@ -185,7 +187,7 @@ def get_data_dict(synthesized_data_dir: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def get_result(data_dict: dict) -> None:
+def get_result(data_dict: dict, snr: int, noise_type: str) -> pd.DataFrame:
     logger.info("Loading Whisper large model on mps ...")
     model = whisper.load_model("large", device="mps").float()
     logger.info("Model loaded.")
@@ -232,7 +234,8 @@ def get_result(data_dict: dict) -> None:
 
         result_df = save_result(
             result_df,
-            snr=-10,
+            snr=snr,
+            noise_type=noise_type,
             denoize_model_name="noisereduce",
             ref=ref,
             pred=pred,
@@ -263,6 +266,18 @@ def get_result(data_dict: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def parse_path_info(synthesized_data_dir: str) -> tuple[int, str]:
+    """경로에서 SNR 값과 노이즈 타입을 파싱한다.
+
+    예) .../synthesized/snr_-10/traffic -> (-10, "traffic")
+    """
+    parts = synthesized_data_dir.rstrip("/").split(os.sep)
+    noise_type = parts[-1]
+    snr_str = parts[-2]  # e.g. "snr_-10"
+    snr_value = int(snr_str.replace("snr_", ""))
+    return snr_value, noise_type
+
+
 def run_track_a(syn_path_list: list) -> None:
     logger.info("=== track_a experiment start (timestamp: %s) ===", timestamp)
     logger.info("result_path : %s", result_path)
@@ -270,9 +285,10 @@ def run_track_a(syn_path_list: list) -> None:
 
     all_results = []
     for synthesized_data_dir in syn_path_list:
-        logger.info("--- %s ---", synthesized_data_dir)
+        snr_value, noise_type = parse_path_info(synthesized_data_dir)
+        logger.info("--- %s  (SNR=%d, noise=%s) ---", synthesized_data_dir, snr_value, noise_type)
         data_dict = get_data_dict(synthesized_data_dir)
-        result_df = get_result(data_dict)
+        result_df = get_result(data_dict, snr=snr_value, noise_type=noise_type)
         all_results.append(result_df)
 
     combined_df = pd.concat(all_results, ignore_index=True)
