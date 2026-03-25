@@ -289,6 +289,7 @@ class STTAndVADProcessor:
                 audio_path,
                 language=self._stt_language,
                 verbose=False,
+                fp16=False,
             )
         except Exception as exc:
             raise RuntimeError(
