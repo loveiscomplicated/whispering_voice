@@ -69,6 +69,10 @@ def _load_whisper(model_name: str = "base", device: str = "cpu") -> Any:
 
     logger.info(f"Loading Whisper model '{model_name}' on {device} …")
     model = whisper.load_model(model_name, device=device)
+    # MPS (Apple Silicon) has numerical issues with Whisper's default fp16 weights,
+    # producing NaN logits.  Cast to fp32 to avoid this.
+    if str(device) == "mps":
+        model = model.float()
     logger.info("Whisper model loaded.")
     return model
 
