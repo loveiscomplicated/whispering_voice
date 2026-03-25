@@ -91,3 +91,4 @@ backend/data_generation/stt_and_vad
 .claude
 backend/data_generation/segments
 backend/data_generation/subtitles
+backend/data_generation/validation_failed
