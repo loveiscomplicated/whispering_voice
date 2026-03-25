@@ -66,12 +66,25 @@ def save_result(
 # setup
 # ---------------------------------------------------------------------------
 
+
+def get_syn_path_list(data_generation_dir):
+    syn_par_dir = os.path.join(data_generation_dir, "synthesized")
+    snr_levels = os.listdir(syn_par_dir)
+    syn_path_list = []
+    for snr in snr_levels:
+        snr_path = os.path.join(syn_par_dir, snr)
+        situations = os.listdir(snr_path)
+        for s in situations:
+            path = os.path.join(snr_path, s)
+            syn_path_list.append(path)
+    return syn_path_list
+
+
 now = datetime.datetime.now()
 timestamp = now.strftime("%Y%m%d_%H%M%S")
 
 cur_dir = os.path.dirname(__file__)
 data_generation_dir = os.path.abspath(os.path.join(cur_dir, "..", ".."))
-synthesized_data_dir = os.path.join(data_generation_dir, "synthesized/snr_-10/traffic")
 log_path = os.path.join(cur_dir, "result", f"track_a_{timestamp}.log")
 result_path = os.path.join(cur_dir, "result", f"track_a_{timestamp}.csv")
 
@@ -177,19 +190,7 @@ def get_result(data_dict: dict) -> None:
     model = whisper.load_model("large", device="mps").float()
     logger.info("Model loaded.")
 
-    result_df = pd.DataFrame(
-        columns=[
-            "snr",
-            "denoize_model_name",
-            "ref",
-            "pred",
-            "wer",
-            "cer",
-            "no_speech_prob",
-            "avg_logprob",
-            "is_hallucination",
-        ]
-    )
+    result_df = pd.DataFrame()
 
     def transcribe(name: str) -> None:
         nonlocal result_df
@@ -254,31 +255,42 @@ def get_result(data_dict: dict) -> None:
         for name in tqdm(data_dict.keys(), desc="Evaluating"):
             transcribe(name)
 
-    avg_cer = result_df["cer"].mean()
-    avg_wer = result_df["wer"].mean()
-
-    logger.info("=" * 60)
-    logger.info("  샘플 수  : %d", len(result_df))
-    logger.info("  평균 CER : %.4f  (%.2f%%)", avg_cer, avg_cer * 100)
-    logger.info("  평균 WER : %.4f  (%.2f%%)", avg_wer, avg_wer * 100)
-    logger.info("=" * 60)
-
-    os.makedirs(os.path.dirname(result_path), exist_ok=True)
-    result_df.to_csv(result_path, index=False, encoding="utf-8-sig")
-    logger.info("Results saved to: %s", result_path)
+    return result_df
 
 
 # ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+
+def run_track_a(syn_path_list: list) -> None:
     logger.info("=== track_a experiment start (timestamp: %s) ===", timestamp)
-    logger.info("synthesized_data_dir : %s", synthesized_data_dir)
-    logger.info("result_path          : %s", result_path)
-    logger.info("log_path             : %s", log_path)
+    logger.info("result_path : %s", result_path)
+    logger.info("log_path    : %s", log_path)
 
-    data_dict = get_data_dict(synthesized_data_dir)
-    get_result(data_dict)
+    all_results = []
+    for synthesized_data_dir in syn_path_list:
+        logger.info("--- %s ---", synthesized_data_dir)
+        data_dict = get_data_dict(synthesized_data_dir)
+        result_df = get_result(data_dict)
+        all_results.append(result_df)
 
+    combined_df = pd.concat(all_results, ignore_index=True)
+
+    avg_cer = combined_df["cer"].mean()
+    avg_wer = combined_df["wer"].mean()
+    logger.info("=" * 60)
+    logger.info("  전체 샘플 수  : %d", len(combined_df))
+    logger.info("  전체 평균 CER : %.4f  (%.2f%%)", avg_cer, avg_cer * 100)
+    logger.info("  전체 평균 WER : %.4f  (%.2f%%)", avg_wer, avg_wer * 100)
+    logger.info("=" * 60)
+
+    os.makedirs(os.path.dirname(result_path), exist_ok=True)
+    combined_df.to_csv(result_path, index=False, encoding="utf-8-sig")
+    logger.info("Results saved to: %s", result_path)
     logger.info("=== track_a experiment done ===")
+
+
+if __name__ == "__main__":
+    syn_path_list = get_syn_path_list(data_generation_dir)
+    run_track_a(syn_path_list)
