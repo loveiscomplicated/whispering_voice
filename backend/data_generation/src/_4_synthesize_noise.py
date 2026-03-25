@@ -101,22 +101,53 @@ def _loop_to_length(audio: np.ndarray, target_length: int) -> np.ndarray:
     return np.tile(audio, repeats)[:target_length]
 
 
-def _truncate_to_length(audio: np.ndarray, target_length: int) -> np.ndarray:
-    """Truncate *audio* to exactly *target_length* samples.
-    randomly choose the starting point.
+def _get_duration_samples(path: Path, sr: int) -> int:
+    """Return the total sample count of an audio file at *sr* Hz.
+
+    Uses ``soundfile.info`` for a fast metadata-only read (no decoding).
+    Falls back to loading the full file if soundfile is unavailable.
 
     Args:
-        audio: 1-D float32 audio array.
-        target_length: Desired number of samples.
+        path: Path to the audio file.
+        sr: Target sample rate in Hz.
 
     Returns:
-        Array of exactly *target_length* samples.
+        Number of samples after resampling to *sr*.
     """
-    import random
+    try:
+        import soundfile as sf
 
-    end_tail = len(audio) - target_length
-    start = random.randint(0, end_tail)
-    return audio[start : start + target_length]
+        info = sf.info(str(path))
+        return int(round(info.frames * sr / info.samplerate))
+    except Exception:
+        audio, _ = load_audio(str(path), sr=sr)
+        return len(audio)
+
+
+def _build_offsets(
+    total_samples: int,
+    crop_count: int,
+    threshold_samples: int,
+) -> list[int]:
+    """Return evenly-spaced crop start offsets for a noise file.
+
+    If *total_samples* is at or below *threshold_samples* the file is short
+    enough to use as-is, so a single offset of ``0`` is returned.  Otherwise
+    *crop_count* offsets are spread uniformly across the full duration so that
+    every region of the file is represented in the synthesized dataset.
+
+    Args:
+        total_samples: Length of the noise file in samples.
+        crop_count: Number of crops to generate for long files.
+        threshold_samples: Files at or below this length get a single crop.
+
+    Returns:
+        List of integer sample offsets (length 1 or *crop_count*).
+    """
+    if total_samples <= threshold_samples:
+        return [0]
+    step = total_samples // crop_count
+    return [i * step for i in range(crop_count)]
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +186,15 @@ class NoiseSynthesizer:
         self._output_base = Path(
             config.get("output_dirs", {}).get("synthesized", "./synthesized")
         )
+        # Noise crop settings.
+        # noise_crop_count   : how many evenly-spaced crops to take from a long file.
+        # long_noise_threshold_s : files longer than this (seconds) are cropped;
+        #                          shorter files are used from offset 0 as-is.
+        # Both are configurable under synthesis: in generation.yaml.
+        self._crop_count: int = int(synth_cfg.get("noise_crop_count", 10))
+        self._long_noise_threshold_s: float = float(
+            synth_cfg.get("long_noise_threshold_s", 60.0)
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -165,6 +205,7 @@ class NoiseSynthesizer:
         asmr_path: str,
         noise_path: str,
         snr_db: float,
+        noise_offset: int = 0,
     ) -> np.ndarray:
         """Mix a clean signal with a noise signal at a target SNR.
 
@@ -172,6 +213,10 @@ class NoiseSynthesizer:
             asmr_path: Path to the clean (ASMR) audio file.
             noise_path: Path to the background noise audio file.
             snr_db: Desired signal-to-noise ratio in dB.
+            noise_offset: Start sample index into the noise file.  The slice
+                ``noise[noise_offset : noise_offset + target_len]`` is used;
+                if the remainder is shorter than *target_len* it is looped to
+                fill.  Defaults to ``0`` (use from the beginning).
 
         Returns:
             Mixed 1-D float32 audio array at 16 kHz, peak-normalised.
@@ -181,13 +226,14 @@ class NoiseSynthesizer:
             FileNotFoundError: If either file does not exist.
         """
         signal, _ = load_audio(asmr_path, sr=_SAMPLE_RATE)
-        noise, _ = load_audio(noise_path, sr=_SAMPLE_RATE)
+        noise_full, _ = load_audio(noise_path, sr=_SAMPLE_RATE)
 
         target_len = len(signal)
-        if len(noise) >= target_len:
-            noise = _truncate_to_length(noise, target_len)
-        else:
+        noise = noise_full[noise_offset:]
+        if len(noise) < target_len:
             noise = _loop_to_length(noise, target_len)
+        else:
+            noise = noise[:target_len]
 
         # Apply fade to both before mixing to reduce edge artefacts
         signal = _apply_fade(signal, _SAMPLE_RATE, _FADE_DURATION_MS)
@@ -286,33 +332,53 @@ class NoiseSynthesizer:
                 "Synthesized metadata will not include transcripts."
             )
 
-        # Collect noise files per type
-        noise_files: dict[str, list[Path]] = {}
+        # Collect noise files per type and expand each file into (path, offset, label_suffix)
+        # crops based on its duration relative to the threshold.
+        threshold_samples = int(self._long_noise_threshold_s * _SAMPLE_RATE)
+
+        # noise_entries: noise_type → [(path, offset, label_suffix)]
+        noise_entries: dict[str, list[tuple[Path, int, str]]] = {}
         for noise_type in self._noise_types:
             type_dir = Path(noise_dir) / noise_type
-            if type_dir.is_dir():
-                files = sorted(
-                    p
-                    for p in type_dir.iterdir()
-                    if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS
-                )
-                if files:
-                    noise_files[noise_type] = files
-                else:
-                    self._logger.warning(f"No noise files in: {type_dir}")
-            else:
+            if not type_dir.is_dir():
                 self._logger.warning(f"Noise type dir not found: {type_dir}")
+                continue
+            files = sorted(
+                p
+                for p in type_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS
+            )
+            if not files:
+                self._logger.warning(f"No noise files in: {type_dir}")
+                continue
 
-        if not noise_files:
+            entries: list[tuple[Path, int, str]] = []
+            for path in files:
+                total_samples = _get_duration_samples(path, _SAMPLE_RATE)
+                offsets = _build_offsets(
+                    total_samples, self._crop_count, threshold_samples
+                )
+                multi = len(offsets) > 1
+                if multi:
+                    self._logger.info(
+                        f"  {path.name}: {total_samples / _SAMPLE_RATE:.0f}s "
+                        f"→ {len(offsets)} crops"
+                    )
+                for i, offset in enumerate(offsets):
+                    suffix = f"_c{i:02d}" if multi else ""
+                    entries.append((path, offset, suffix))
+            noise_entries[noise_type] = entries
+
+        if not noise_entries:
             self._logger.error("No usable noise files found. Aborting batch.")
             return {}
 
-        total = (
-            len(asmr_files) * sum(len(v) for v in noise_files.values()) * len(levels)
-        )
+        total_noise_entries = sum(len(v) for v in noise_entries.values())
+        total = len(asmr_files) * total_noise_entries * len(levels)
         self._logger.info(
             f"Synthesizing {total} combinations "
-            f"({len(asmr_files)} ASMR × noise × {len(levels)} SNR levels)"
+            f"({len(asmr_files)} ASMR × {total_noise_entries} noise crops "
+            f"× {len(levels)} SNR levels)"
         )
 
         results: dict[str, list[str]] = {}
@@ -320,10 +386,12 @@ class NoiseSynthesizer:
 
         for asmr_path in asmr_files:
             audio_id = asmr_path.stem
-            for noise_type, n_files in noise_files.items():
-                for noise_path in n_files:
+            for noise_type, entries in noise_entries.items():
+                for noise_path, noise_offset, crop_suffix in entries:
                     for snr in levels:
-                        label = f"{audio_id}_snr{int(snr):02d}_{noise_type}"
+                        label = (
+                            f"{audio_id}_snr{int(snr):02d}_{noise_type}{crop_suffix}"
+                        )
                         snr_tag = f"snr_{int(snr):02d}"
                         out_dir = out_root / snr_tag / noise_type
                         out_path = out_dir / f"{label}.wav"
@@ -336,7 +404,10 @@ class NoiseSynthesizer:
 
                         try:
                             mixed = self.synthesize(
-                                str(asmr_path), str(noise_path), snr
+                                str(asmr_path),
+                                str(noise_path),
+                                snr,
+                                noise_offset=noise_offset,
                             )
                             save_audio(mixed, str(out_path), sr=_SAMPLE_RATE)
                             self._save_synthesis_metadata(
