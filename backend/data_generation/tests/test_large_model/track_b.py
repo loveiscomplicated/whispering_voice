@@ -1,3 +1,8 @@
+"""
+This script must be run by additional environment STT_env_2 !!!
+See requirements_STT_env_2.txt in the root.
+"""
+
 import os
 import sys
 import datetime
@@ -162,7 +167,10 @@ def get_result(
             audio_denoised = denoiser_fn(audio, sr=16000)
         except Exception as e:
             logger.warning(
-                "[%s] denoiser '%s' failed: %s — using raw audio", name, denoiser_name, e
+                "[%s] denoiser '%s' failed: %s — using raw audio",
+                name,
+                denoiser_name,
+                e,
             )
             audio_denoised = audio
 
