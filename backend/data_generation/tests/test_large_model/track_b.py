@@ -190,29 +190,10 @@ def denoise_meta_denoiser(audio: np.ndarray, sr: int) -> np.ndarray:
     return enhanced
 
 
-def denoise_resemble_enhance(audio: np.ndarray, sr: int) -> np.ndarray:
-    """Resemble Enhance — 음성 품질 향상 특화 모델."""
-    import torch
-    from resemble_enhance.enhancer.inference import enhance as _enhance
-
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
-    audio_tensor = torch.from_numpy(audio).float()
-    enhanced_tensor, out_sr = _enhance(audio_tensor, sr, device=device)
-    enhanced = enhanced_tensor.numpy()
-
-    if out_sr != sr:
-        import resampy
-
-        enhanced = resampy.resample(enhanced, out_sr, sr)
-
-    return enhanced
-
-
 DENOISERS: dict[str, callable] = {
     "noisereduce": denoise_noisereduce,
     "deepfilternet": denoise_deepfilternet,
     "meta_denoiser": denoise_meta_denoiser,
-    "resemble_enhance": denoise_resemble_enhance,
 }
 
 
