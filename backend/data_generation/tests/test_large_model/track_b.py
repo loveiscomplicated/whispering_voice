@@ -18,6 +18,11 @@ See requirements_STT_env_2.txt in the root.
 """
 
 import os
+
+# Must be set before torch/MPS initializes — Whisper large uses sparse buffers
+# that SparseMPS doesn't support, so we need CPU fallback for those ops.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 import sys
 import datetime
 
@@ -64,12 +69,19 @@ def transcribe_with_local_whisper(
 
     if model_name not in _WHISPER_MODEL_CACHE:
         device = "mps" if torch.backends.mps.is_available() else "cpu"
-        if device == "mps":
-            # Whisper large has sparse buffers that SparseMPS doesn't support;
-            # enable CPU fallback for unsupported ops so MPS is still used elsewhere.
-            os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
         logger.info("Loading local Whisper model '%s' on %s …", model_name, device)
-        _WHISPER_MODEL_CACHE[model_name] = whisper.load_model(model_name, device=device)
+        model = whisper.load_model(model_name, device="cpu")
+        if device == "mps":
+            # SparseMPS does not support COO sparse tensor creation ops.
+            # Convert sparse buffers to dense before moving to MPS.
+            for name, buf in list(model.named_buffers()):
+                if buf.is_sparse:
+                    *path, attr = name.split(".")
+                    parent = model
+                    for p in path:
+                        parent = getattr(parent, p)
+                    setattr(parent, attr, buf.to_dense())
+        _WHISPER_MODEL_CACHE[model_name] = model.to(device)
 
     model = _WHISPER_MODEL_CACHE[model_name]
     result = model.transcribe(audio, language=language, fp16=False)

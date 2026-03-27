@@ -381,20 +381,85 @@ class NoiseSynthesizer:
             f"× {len(levels)} SNR levels)"
         )
 
+        # ----------------------------------------------------------------
+        # Pre-create all output directories (avoids repeated mkdir calls
+        # inside the hot loop which are expensive on macOS APFS).
+        # ----------------------------------------------------------------
+        for snr in levels:
+            for noise_type in noise_entries:
+                (out_root / f"snr_{int(snr):02d}" / noise_type).mkdir(
+                    parents=True, exist_ok=True
+                )
+
+        # ----------------------------------------------------------------
+        # Cache every unique noise file in memory so each WAV is read
+        # exactly once regardless of how many (ASMR × SNR) pairs use it.
+        # ----------------------------------------------------------------
+        unique_noise_paths = {p for entries in noise_entries.values() for p, _, _ in entries}
+        self._logger.info(f"Pre-loading {len(unique_noise_paths)} noise file(s) into memory …")
+        noise_cache: dict[Path, np.ndarray] = {}
+        for p in sorted(unique_noise_paths):
+            audio, _ = load_audio(str(p), sr=_SAMPLE_RATE)
+            noise_cache[p] = audio
+            self._logger.debug(f"  loaded {p.name} ({len(audio) / _SAMPLE_RATE:.0f}s)")
+
+        # ----------------------------------------------------------------
+        # Cache every ASMR file in memory (small files, loaded once).
+        # ----------------------------------------------------------------
+        self._logger.info(f"Pre-loading {len(asmr_files)} ASMR file(s) into memory …")
+        asmr_cache: dict[Path, np.ndarray] = {}
+        for p in asmr_files:
+            audio, _ = load_audio(str(p), sr=_SAMPLE_RATE)
+            asmr_cache[p] = audio
+
+        # ----------------------------------------------------------------
+        # Main synthesis loop.
+        # For each (ASMR, noise_crop) pair:
+        #   1. Apply fade + compute RMS once (shared across all SNR levels).
+        #   2. Inner SNR loop: pure numpy scale → save.
+        # This avoids re-reading files and re-computing fades/RMS per SNR.
+        # ----------------------------------------------------------------
         results: dict[str, list[str]] = {}
         pbar = tqdm(total=total, desc="Synthesizing", unit="file")
 
         for asmr_path in asmr_files:
             audio_id = asmr_path.stem
+            signal_raw = asmr_cache[asmr_path]
+
             for noise_type, entries in noise_entries.items():
                 for noise_path, noise_offset, crop_suffix in entries:
-                    for snr in levels:
-                        label = (
-                            f"{audio_id}_snr{int(snr):02d}_{noise_type}{crop_suffix}"
+                    noise_full = noise_cache[noise_path]
+
+                    # Prepare the noise crop that matches this ASMR length.
+                    target_len = len(signal_raw)
+                    noise_raw = noise_full[noise_offset:]
+                    if len(noise_raw) < target_len:
+                        noise_raw = _loop_to_length(noise_raw, target_len)
+                    else:
+                        noise_raw = noise_raw[:target_len]
+
+                    # Apply fade and compute RMS — done once per (ASMR, noise_crop).
+                    signal = _apply_fade(signal_raw, _SAMPLE_RATE, _FADE_DURATION_MS)
+                    noise = _apply_fade(noise_raw, _SAMPLE_RATE, _FADE_DURATION_MS)
+                    rms_signal = _rms(signal)
+                    rms_noise = _rms(noise)
+
+                    if rms_signal < 1e-9:
+                        self._logger.warning(f"Silent ASMR, skipping: {audio_id}")
+                        pbar.update(len(levels))
+                        continue
+                    if rms_noise < 1e-9:
+                        self._logger.warning(
+                            f"Silent noise crop, skipping: {noise_path.name} offset={noise_offset}"
                         )
+                        pbar.update(len(levels))
+                        continue
+
+                    # SNR loop: pure numpy, no I/O re-reads.
+                    for snr in levels:
+                        label = f"{audio_id}_snr{int(snr):02d}_{noise_type}{crop_suffix}"
                         snr_tag = f"snr_{int(snr):02d}"
-                        out_dir = out_root / snr_tag / noise_type
-                        out_path = out_dir / f"{label}.wav"
+                        out_path = out_root / snr_tag / noise_type / f"{label}.wav"
 
                         if out_path.exists():
                             self._logger.debug(f"Skipping existing: {out_path.name}")
@@ -403,12 +468,12 @@ class NoiseSynthesizer:
                             continue
 
                         try:
-                            mixed = self.synthesize(
-                                str(asmr_path),
-                                str(noise_path),
-                                snr,
-                                noise_offset=noise_offset,
-                            )
+                            scale = rms_signal / (rms_noise * 10 ** (snr / 20.0))
+                            mixed = (signal + noise * scale).astype(np.float32)
+                            peak = float(np.max(np.abs(mixed)))
+                            if peak > 1.0:
+                                mixed = mixed / peak
+
                             save_audio(mixed, str(out_path), sr=_SAMPLE_RATE)
                             self._save_synthesis_metadata(
                                 out_path,

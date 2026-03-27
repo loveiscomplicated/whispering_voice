@@ -3,8 +3,8 @@ youtube:
     #- "PL6YVF-LNNIQZKBcG17-p1Jh1U6X9xGj-g"
     #- "PLLA-cMc71Xr3HLMAvSQ4gmoqqsNcdo1Yj&index=21"
     #- "PL6YVF-LNNIQYZpKz3IlGEjK_2Nn6P1ZI0" # office
-    #- "PL6YVF-LNNIQZxzIqbS4OEquMNoASC7Zb4" # traffic
-    - "PL6YVF-LNNIQYDHgI3qV9Y3t9_49X1-spZ" # ambient
+    - "PL6YVF-LNNIQZxzIqbS4OEquMNoASC7Zb4" # traffic
+    #- "PL6YVF-LNNIQYDHgI3qV9Y3t9_49X1-spZ" # ambient
   max_videos_per_playlist: 1000 # 1 for debug
 
 quality_validation:
@@ -57,7 +57,7 @@ synthesis:
     office: 0.3
 
 output_dirs:
-  raw_downloads: "./backend/data_generation/raw_downloads/noise/ambient"
+  raw_downloads: "./backend/data_generation/raw_downloads/noise/traffic"
 
 reproducibility:
   seed: 42
