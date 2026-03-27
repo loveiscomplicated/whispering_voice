@@ -1,8 +1,8 @@
 youtube:
   playlist_ids:
-    - "PL6YVF-LNNIQaVyUUBytz5F1GJGuxC3zNg"
+    - "PL6YVF-LNNIQaVyUUBytz5F1GJGuxC3zNg" # kor_sub
     # - "PL6YVF-LNNIQZfpSqfl5n4R7HUYIq4Ur01" # eng
-    - "PL6YVF-LNNIQaVyUUBytz5F1GJGuxC3zNg"
+    # - "PL6YVF-LNNIQb_yCmKUkM-tShu-Z-DCapZ"
   max_videos_per_playlist: 1000 # 1 for debug
 
 quality_validation:
@@ -66,8 +66,10 @@ segmentation:
   vad_fallback_threshold: 0.3     # use subtitle path when speech_ratio < 30%
 
 synthesis:
-  snr_levels_db: [-20, -15, -10, -7, -5, -3, 0, 5, 10]  # [-10]
+  snr_levels_db: [-20, -15, -10, -7, -5, -3, 0, 5, 10]
   noise_types: ["ambient", "traffic", "office"]
+  noise_crop_count: 1        # crops per long noise file (was default 10 → 534k combos)
+  long_noise_threshold_s: 30 # files longer than this get cropped; shorter used as-is
 
 output_dirs:
   raw_downloads: "./backend/data_generation/raw_downloads"

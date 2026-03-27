@@ -1,14 +1,20 @@
+import io
 import os
 import sys
 import json
+import time
 import datetime
 
+import numpy as np
 import pandas as pd
 from typing import Literal
+from dotenv import load_dotenv
 import whisper
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 import noisereduce as nr
+
+load_dotenv()
 
 
 def save_result(
@@ -61,7 +67,96 @@ def save_result(
         "is_hallucination": is_hallucination,
     }
     new_row = pd.DataFrame([row_dict])
+    if result_df.empty:
+        return new_row
     return pd.concat([result_df, new_row], ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Groq transcription helpers
+# ---------------------------------------------------------------------------
+
+
+def _numpy_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
+    """Convert a float32 numpy audio array to WAV bytes for API upload."""
+    import soundfile as sf
+
+    buf = io.BytesIO()
+    sf.write(buf, audio, sr, format="WAV", subtype="PCM_16")
+    buf.seek(0)
+    return buf.read()
+
+
+def transcribe_with_groq(
+    audio: np.ndarray,
+    sr: int,
+    client,
+    model: str = "whisper-large-v3",
+    language: str = "ko",
+    max_retries: int = 5,
+) -> dict:
+    """Send *audio* to Groq Whisper API and return a dict matching the local
+    Whisper output format: ``{"text": str, "segments": [...]}``.
+
+    SDK 내부 retry는 비활성화(Groq(max_retries=0))하고, Retry-After 헤더를
+    직접 읽어 대기 시간을 로그에 기록한 뒤 재시도한다.
+    """
+    from groq import RateLimitError
+
+    wav_bytes = _numpy_to_wav_bytes(audio, sr)
+
+    resp = None
+    for attempt in range(max_retries):
+        t0 = time.time()
+        try:
+            resp = client.audio.transcriptions.create(
+                file=("audio.wav", wav_bytes),
+                model=model,
+                language=language,
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+            )
+            break
+        except RateLimitError as e:
+            elapsed = time.time() - t0
+            # Groq가 Retry-After 헤더로 권장 대기 시간을 알려주면 그 값을 우선 사용한다.
+            wait: float = 5 * (2**attempt)  # fallback: 5s → 10s → 20s → 40s
+            try:
+                retry_after = e.response.headers.get("retry-after")
+                if retry_after:
+                    wait = float(retry_after)
+            except Exception:
+                pass
+
+            if attempt < max_retries - 1:
+                logger.warning(
+                    "Groq rate limit (elapsed=%.1fs) — waiting %.0fs before retry %d/%d",
+                    elapsed,
+                    wait,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(wait)
+            else:
+                raise
+
+    segments = []
+    if resp is not None and hasattr(resp, "segments") and resp.segments:
+        for seg in resp.segments:
+            segments.append(
+                {
+                    "avg_logprob": float(getattr(seg, "avg_logprob", 0.0) or 0.0),
+                    "no_speech_prob": float(getattr(seg, "no_speech_prob", 0.0) or 0.0),
+                    "text": getattr(seg, "text", ""),
+                    "start": float(getattr(seg, "start", 0.0)),
+                    "end": float(getattr(seg, "end", 0.0)),
+                }
+            )
+
+    return {
+        "text": (resp.text if resp is not None and resp.text else ""),
+        "segments": segments,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -188,15 +283,20 @@ def get_data_dict(synthesized_data_dir: str) -> dict:
 
 
 def get_result(data_dict: dict, snr: int, noise_type: str) -> pd.DataFrame:
-    logger.info("Loading Whisper large model on mps ...")
-    model = whisper.load_model("large", device="mps").float()
-    logger.info("Model loaded.")
+    from groq import Groq
 
-    result_df = pd.DataFrame()
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GROQ_API_KEY environment variable is not set. "
+            "Get a key at https://console.groq.com and export it."
+        )
+    client = Groq(api_key=api_key, max_retries=0)
+    logger.info("Groq client ready (model: whisper-large-v3)")
+
+    rows: list[dict] = []
 
     def transcribe(name: str) -> None:
-        nonlocal result_df
-
         audio_path = data_dict[name]["path"]
         audio = whisper.load_audio(audio_path)
         audio_denoised = nr.reduce_noise(
@@ -206,20 +306,13 @@ def get_result(data_dict: dict, snr: int, noise_type: str) -> pd.DataFrame:
             prop_decrease=0.8,
         )
 
-        result = model.transcribe(
-            audio_denoised,
-            language="ko",
-            condition_on_previous_text=False,
-            no_speech_threshold=0.8,
-            fp16=False,
-        )
+        result = transcribe_with_groq(audio_denoised, 16000, client)
 
         pred = normalize(result["text"])
         ref = normalize(data_dict[name]["answer"])
         sample_cer = cer(ref, pred)
         sample_wer = wer(ref, pred)
 
-        # whisper 세그먼트에서 메타데이터 평균
         segments = result.get("segments", [])
         avg_no_speech_prob = (
             sum(s["no_speech_prob"] for s in segments) / len(segments)
@@ -232,18 +325,18 @@ def get_result(data_dict: dict, snr: int, noise_type: str) -> pd.DataFrame:
             else None
         )
 
-        result_df = save_result(
-            result_df,
-            snr=snr,
-            noise_type=noise_type,
-            denoize_model_name="noisereduce",
-            ref=ref,
-            pred=pred,
-            wer=sample_wer,
-            cer=sample_cer,
-            no_speech_prob=avg_no_speech_prob,
-            avg_logprob=avg_logprob,
-        )
+        rows.append({
+            "snr": snr,
+            "noise_type": noise_type,
+            "denoize_model_name": "noisereduce",
+            "ref": ref,
+            "pred": pred,
+            "wer": sample_wer,
+            "cer": sample_cer,
+            "no_speech_prob": avg_no_speech_prob,
+            "avg_logprob": avg_logprob,
+            "is_hallucination": None,
+        })
 
         logger.info(
             "[%s]  CER: %.4f  WER: %.4f  no_speech: %s  logprob: %s",
@@ -258,7 +351,7 @@ def get_result(data_dict: dict, snr: int, noise_type: str) -> pd.DataFrame:
         for name in tqdm(data_dict.keys(), desc="Evaluating"):
             transcribe(name)
 
-    return result_df
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +379,12 @@ def run_track_a(syn_path_list: list) -> None:
     all_results = []
     for synthesized_data_dir in syn_path_list:
         snr_value, noise_type = parse_path_info(synthesized_data_dir)
-        logger.info("--- %s  (SNR=%d, noise=%s) ---", synthesized_data_dir, snr_value, noise_type)
+        logger.info(
+            "--- %s  (SNR=%d, noise=%s) ---",
+            synthesized_data_dir,
+            snr_value,
+            noise_type,
+        )
         data_dict = get_data_dict(synthesized_data_dir)
         result_df = get_result(data_dict, snr=snr_value, noise_type=noise_type)
         all_results.append(result_df)
