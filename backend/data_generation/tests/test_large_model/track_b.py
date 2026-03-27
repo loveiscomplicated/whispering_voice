@@ -1,12 +1,34 @@
+"""
+This script must be run by additional environment STT_env_2 !!!
+See requirements_STT_env_2.txt in the root.
+
+  - CLI 옵션 추가:
+  # Groq (기본값)
+  python track_b.py --backend groq
+
+  # 로컬 Whisper large
+  python track_b.py --backend local
+
+  # 로컬 Whisper medium으로
+  python track_b.py --backend local --whisper-model medium
+
+  # denoiser 선택과 함께
+  python track_b.py --backend local --denoisers noisereduce deepfilternet
+
+"""
+
 import os
 import sys
 import datetime
 
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 import whisper
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+
+load_dotenv()
 
 from track_a import (
     save_result,
@@ -16,7 +38,53 @@ from track_a import (
     get_data_dict,
     get_syn_path_list,
     parse_path_info,
+    transcribe_with_groq,
 )
+
+
+# ---------------------------------------------------------------------------
+# local Whisper transcription wrapper
+# ---------------------------------------------------------------------------
+
+_WHISPER_MODEL_CACHE: dict = {}
+
+
+def transcribe_with_local_whisper(
+    audio: np.ndarray,
+    sr: int,
+    model_name: str = "large",
+    language: str = "ko",
+) -> dict:
+    """로컬 Whisper 모델로 transcribe한다.
+
+    Returns the same dict shape as transcribe_with_groq:
+    ``{"text": str, "segments": [...]}``
+    """
+    import torch
+
+    if model_name not in _WHISPER_MODEL_CACHE:
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        if device == "mps":
+            # Whisper large has sparse buffers that SparseMPS doesn't support;
+            # enable CPU fallback for unsupported ops so MPS is still used elsewhere.
+            os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+        logger.info("Loading local Whisper model '%s' on %s …", model_name, device)
+        _WHISPER_MODEL_CACHE[model_name] = whisper.load_model(model_name, device=device)
+
+    model = _WHISPER_MODEL_CACHE[model_name]
+    result = model.transcribe(audio, language=language, fp16=False)
+
+    segments = [
+        {
+            "avg_logprob": float(s.get("avg_logprob", 0.0) or 0.0),
+            "no_speech_prob": float(s.get("no_speech_prob", 0.0) or 0.0),
+            "text": s.get("text", ""),
+            "start": float(s.get("start", 0.0)),
+            "end": float(s.get("end", 0.0)),
+        }
+        for s in result.get("segments") or []
+    ]
+    return {"text": result.get("text", ""), "segments": segments}
 
 
 # ---------------------------------------------------------------------------
@@ -50,35 +118,34 @@ def denoise_noisereduce(audio: np.ndarray, sr: int) -> np.ndarray:
     return nr.reduce_noise(y=audio, sr=sr, stationary=False, prop_decrease=0.8)
 
 
+_DF_MODEL_CACHE: dict = {}
+
+
 def denoise_deepfilternet(audio: np.ndarray, sr: int) -> np.ndarray:
     """DeepFilterNet — 경량 실시간 노이즈 제거 모델."""
-    from df.enhance import enhance, init_df, load_audio, save_audio
-    from df.io import resample
+    import torch
+    import torchaudio
+    from df.enhance import enhance, init_df
 
-    model, df_state, _ = init_df()
+    if "model" not in _DF_MODEL_CACHE:
+        model, df_state, _ = init_df()
+        _DF_MODEL_CACHE["model"] = model
+        _DF_MODEL_CACHE["df_state"] = df_state
+    model = _DF_MODEL_CACHE["model"]
+    df_state = _DF_MODEL_CACHE["df_state"]
     target_sr = df_state.sr()
 
-    # resample to model's expected sr if needed
+    # (1, T) tensor throughout — avoid numpy round-trips that break enhance()
+    audio_t = torch.from_numpy(audio).float().unsqueeze(0)
     if sr != target_sr:
-        audio_resampled = resample(audio, sr, target_sr)
-    else:
-        audio_resampled = audio
+        audio_t = torchaudio.functional.resample(audio_t, sr, target_sr)
 
-    # DeepFilterNet expects (channels, samples); add channel dim
-    if audio_resampled.ndim == 1:
-        audio_resampled = audio_resampled[np.newaxis, :]
+    enhanced_t = enhance(model, df_state, audio_t)
 
-    import torch
-
-    audio_tensor = torch.from_numpy(audio_resampled).float()
-    enhanced_tensor = enhance(model, df_state, audio_tensor)
-    enhanced = enhanced_tensor.squeeze(0).numpy()
-
-    # resample back to whisper's 16kHz
     if target_sr != sr:
-        enhanced = resample(enhanced, target_sr, sr)
+        enhanced_t = torchaudio.functional.resample(enhanced_t, target_sr, sr)
 
-    return enhanced
+    return enhanced_t.squeeze(0).numpy()
 
 
 def denoise_meta_denoiser(audio: np.ndarray, sr: int) -> np.ndarray:
@@ -146,15 +213,14 @@ def get_result(
     data_dict: dict,
     snr: int,
     noise_type: str,
-    model: "whisper.Whisper",
+    transcribe_fn: callable,
     denoiser_name: str,
     denoiser_fn: callable,
 ) -> pd.DataFrame:
-    result_df = pd.DataFrame()
+    """transcribe_fn signature: (audio: np.ndarray, sr: int) -> dict"""
+    rows: list[dict] = []
 
     def transcribe(name: str) -> None:
-        nonlocal result_df
-
         audio_path = data_dict[name]["path"]
         audio = whisper.load_audio(audio_path)  # float32 np.ndarray @ 16kHz
 
@@ -162,17 +228,14 @@ def get_result(
             audio_denoised = denoiser_fn(audio, sr=16000)
         except Exception as e:
             logger.warning(
-                "[%s] denoiser '%s' failed: %s — using raw audio", name, denoiser_name, e
+                "[%s] denoiser '%s' failed: %s — using raw audio",
+                name,
+                denoiser_name,
+                e,
             )
             audio_denoised = audio
 
-        result = model.transcribe(
-            audio_denoised,
-            language="ko",
-            condition_on_previous_text=False,
-            no_speech_threshold=0.8,
-            fp16=False,
-        )
+        result = transcribe_fn(audio_denoised, 16000)
 
         pred = normalize(result["text"])
         ref = normalize(data_dict[name]["answer"])
@@ -191,17 +254,19 @@ def get_result(
             else None
         )
 
-        result_df = save_result(
-            result_df,
-            snr=snr,
-            noise_type=noise_type,
-            denoize_model_name=denoiser_name,
-            ref=ref,
-            pred=pred,
-            wer=sample_wer,
-            cer=sample_cer,
-            no_speech_prob=avg_no_speech_prob,
-            avg_logprob=avg_logprob,
+        rows.append(
+            {
+                "snr": snr,
+                "noise_type": noise_type,
+                "denoize_model_name": denoiser_name,
+                "ref": ref,
+                "pred": pred,
+                "wer": sample_wer,
+                "cer": sample_cer,
+                "no_speech_prob": avg_no_speech_prob,
+                "avg_logprob": avg_logprob,
+                "is_hallucination": None,
+            }
         )
 
         logger.info(
@@ -220,7 +285,7 @@ def get_result(
         for name in tqdm(data_dict.keys(), desc=f"{denoiser_name}"):
             transcribe(name)
 
-    return result_df
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -228,20 +293,58 @@ def get_result(
 # ---------------------------------------------------------------------------
 
 
-def run_track_b(syn_path_list: list, denoisers: dict | None = None) -> None:
+def run_track_b(
+    syn_path_list: list,
+    denoisers: dict | None = None,
+    backend: str = "groq",
+    whisper_model: str = "large",
+) -> None:
+    """
+    Parameters
+    ----------
+    backend : "groq" | "local"
+        "groq"  — Groq cloud API (whisper-large-v3, requires GROQ_API_KEY)
+        "local" — local Whisper model running on MPS/CPU
+    whisper_model : str
+        Whisper model name used when backend="local" (e.g. "large", "medium").
+    """
     if denoisers is None:
         denoisers = DENOISERS
 
     logger.info("=== track_b experiment start (timestamp: %s) ===", timestamp)
     logger.info("result_path : %s", result_path)
     logger.info("log_path    : %s", log_path)
+    logger.info("backend     : %s", backend)
     logger.info("denoisers   : %s", list(denoisers.keys()))
 
-    logger.info("Loading Whisper large model on mps ...")
-    model = whisper.load_model("large", device="mps").float()
-    logger.info("Model loaded.")
+    # --- build transcribe_fn based on selected backend ---
+    if backend == "groq":
+        from groq import Groq
 
-    all_results = []
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY environment variable is not set. "
+                "Get a key at https://console.groq.com and export it."
+            )
+        groq_client = Groq(api_key=api_key, max_retries=0)
+        logger.info("Groq client ready (model: whisper-large-v3)")
+
+        def transcribe_fn(audio: np.ndarray, sr: int) -> dict:
+            return transcribe_with_groq(audio, sr, groq_client)
+
+    elif backend == "local":
+        logger.info("Local Whisper model: %s", whisper_model)
+
+        def transcribe_fn(audio: np.ndarray, sr: int) -> dict:
+            return transcribe_with_local_whisper(audio, sr, model_name=whisper_model)
+
+    else:
+        raise ValueError(f"Unknown backend '{backend}'. Choose 'groq' or 'local'.")
+
+    os.makedirs(os.path.dirname(result_path), exist_ok=True)
+    first_write = True
+    total_rows = 0
 
     for synthesized_data_dir in syn_path_list:
         snr_value, noise_type = parse_path_info(synthesized_data_dir)
@@ -258,15 +361,30 @@ def run_track_b(syn_path_list: list, denoisers: dict | None = None) -> None:
                 data_dict,
                 snr=snr_value,
                 noise_type=noise_type,
-                model=model,
+                transcribe_fn=transcribe_fn,
                 denoiser_name=denoiser_name,
                 denoiser_fn=denoiser_fn,
             )
-            all_results.append(result_df)
 
-    combined_df = pd.concat(all_results, ignore_index=True)
+            # 배치가 끝날 때마다 CSV에 즉시 append 저장
+            result_df.to_csv(
+                result_path,
+                mode="a",
+                index=False,
+                header=first_write,
+                encoding="utf-8-sig",
+            )
+            first_write = False
+            total_rows += len(result_df)
+            logger.info(
+                "Saved batch (%d rows, total %d) → %s",
+                len(result_df),
+                total_rows,
+                result_path,
+            )
 
-    # SNR × denoiser 매트릭스 요약 출력
+    # 최종 요약: 이미 저장된 CSV를 다시 읽어 피벗 출력
+    combined_df = pd.read_csv(result_path)
     logger.info("=" * 70)
     logger.info("  전체 샘플 수: %d", len(combined_df))
 
@@ -280,8 +398,6 @@ def run_track_b(syn_path_list: list, denoisers: dict | None = None) -> None:
     logger.info("WER matrix (SNR x denoiser):\n%s", pivot_wer.to_string())
     logger.info("=" * 70)
 
-    os.makedirs(os.path.dirname(result_path), exist_ok=True)
-    combined_df.to_csv(result_path, index=False, encoding="utf-8-sig")
     logger.info("Results saved to: %s", result_path)
     logger.info("=== track_b experiment done ===")
 
@@ -297,8 +413,24 @@ if __name__ == "__main__":
         default=list(DENOISERS.keys()),
         help="Which denoisers to run (default: all)",
     )
+    parser.add_argument(
+        "--backend",
+        choices=["groq", "local"],
+        default="groq",
+        help="STT backend: 'groq' (Groq cloud API) or 'local' (local Whisper, default: groq)",
+    )
+    parser.add_argument(
+        "--whisper-model",
+        default="large",
+        help="Whisper model name for --backend=local (default: large)",
+    )
     args = parser.parse_args()
 
     selected_denoisers = {k: DENOISERS[k] for k in args.denoisers}
     syn_path_list = get_syn_path_list(data_generation_dir)
-    run_track_b(syn_path_list, denoisers=selected_denoisers)
+    run_track_b(
+        syn_path_list,
+        denoisers=selected_denoisers,
+        backend=args.backend,
+        whisper_model=args.whisper_model,
+    )

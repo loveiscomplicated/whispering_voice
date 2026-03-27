@@ -286,7 +286,12 @@ def run_track_a(syn_path_list: list) -> None:
     all_results = []
     for synthesized_data_dir in syn_path_list:
         snr_value, noise_type = parse_path_info(synthesized_data_dir)
-        logger.info("--- %s  (SNR=%d, noise=%s) ---", synthesized_data_dir, snr_value, noise_type)
+        logger.info(
+            "--- %s  (SNR=%d, noise=%s) ---",
+            synthesized_data_dir,
+            snr_value,
+            noise_type,
+        )
         data_dict = get_data_dict(synthesized_data_dir)
         result_df = get_result(data_dict, snr=snr_value, noise_type=noise_type)
         all_results.append(result_df)
