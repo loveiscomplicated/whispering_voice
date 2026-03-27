@@ -177,19 +177,15 @@ def get_syn_path_list(data_generation_dir):
     return syn_path_list
 
 
-now = datetime.datetime.now()
-timestamp = now.strftime("%Y%m%d_%H%M%S")
-
 cur_dir = os.path.dirname(__file__)
 data_generation_dir = os.path.abspath(os.path.join(cur_dir, "..", ".."))
-log_path = os.path.join(cur_dir, "result", f"track_a_{timestamp}.log")
-result_path = os.path.join(cur_dir, "result", f"track_a_{timestamp}.csv")
 
 sys.path.insert(0, data_generation_dir)
 
-from src.utils.logger import setup_logger
+from src.utils.logger import setup_logger, _add_file_handler
 
-logger = setup_logger(name="Track A", log_file=log_path)
+# Console-only logger at import time; file handler is added in run_track_a().
+logger = setup_logger(name="Track A")
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +368,11 @@ def parse_path_info(synthesized_data_dir: str) -> tuple[int, str]:
 
 
 def run_track_a(syn_path_list: list) -> None:
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(cur_dir, "result", f"track_a_{timestamp}.log")
+    result_path = os.path.join(cur_dir, "result", f"track_a_{timestamp}.csv")
+    _add_file_handler(logger, log_path, level=logger.level or 10)
+
     logger.info("=== track_a experiment start (timestamp: %s) ===", timestamp)
     logger.info("result_path : %s", result_path)
     logger.info("log_path    : %s", log_path)
